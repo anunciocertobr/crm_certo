@@ -41,6 +41,15 @@ SERVICE_SIDEKIQ="evocrm_evocrm_crm_sidekiq"
 TARGET="${1:-both}" # crm | sidekiq | both
 NOTE="${2:-}"
 
+case "$TARGET" in
+  crm|sidekiq|both) ;;
+  *)
+    echo "ERRO: alvo inválido '$TARGET' — use 'crm', 'sidekiq' ou 'both' como primeiro argumento." >&2
+    echo "(Nota do deploy vai no SEGUNDO argumento: bin/deploy_vps.sh both minha-nota)" >&2
+    exit 1
+    ;;
+esac
+
 ssh_vps() { ssh -i "$SSH_KEY" "$VPS_HOST" "$@" 2>&1 | grep -v "System is booting" || true; }
 
 echo "==> Checking git state..."
