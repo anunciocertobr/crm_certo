@@ -344,9 +344,12 @@ module Api
 
       # Recebe a semana INTEIRA de shifts (o front manda todos os dias, não só
       # o que mudou — ver nota em Ifood::Client#update_opening_hours sobre por
-      # que o PUT sobrescreve tudo).
+      # que o PUT sobrescreve tudo). `shifts: []` é um valor válido (apagar
+      # todos os blocos e salvar = fechar a loja todos os dias) — usar
+      # `params.require` aqui rejeitaria isso, já que Rails trata array vazio
+      # como "parâmetro ausente".
       def update_opening_hours
-        shifts = params.require(:shifts).map do |s|
+        shifts = Array(params[:shifts]).map do |s|
           { dayOfWeek: s.require(:day_of_week), start: s.require(:start), duration: s.require(:duration) }
         end
         data = Ifood::Client.new.update_opening_hours(shifts)
