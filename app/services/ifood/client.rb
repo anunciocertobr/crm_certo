@@ -156,6 +156,21 @@ class Ifood::Client
     end.each { |i| delete_interruption(i['id'], merchant_id: merchant_id) }
   end
 
+  # Horário de funcionamento — semana inteira. Confirmado contra a API real:
+  # GET devolve {"storeId", "shifts": [{id, dayOfWeek, start, duration,
+  # enabled, creatredAt}]} (um shift por bloco contínuo; um dia com múltiplos
+  # intervalos tem várias entradas com o mesmo dayOfWeek). O PUT SOBRESCREVE
+  # a semana inteira — quem chama precisa mandar todos os dias que quer
+  # manter, não só os que está alterando, senão os outros dias somem.
+  # `duration` é em MINUTOS a partir de `start` (não um horário de fim).
+  def opening_hours(merchant_id = self.class.merchant_id)
+    get("/merchant/v1.0/merchants/#{merchant_id}/opening-hours") || {}
+  end
+
+  def update_opening_hours(shifts, merchant_id = self.class.merchant_id)
+    put("/merchant/v1.0/merchants/#{merchant_id}/opening-hours", { shifts: shifts })
+  end
+
   # Cardápio — catálogo, categorias, produtos e itens (produto + categoria +
   # preço = o que aparece pro cliente).
   def catalogs(merchant_id = self.class.merchant_id)

@@ -334,6 +334,27 @@ module Api
         render json: { success: false, errors: [e.message] }, status: :bad_gateway
       end
 
+      # Horário de funcionamento da loja — semana inteira.
+      def opening_hours
+        data = Ifood::Client.new.opening_hours
+        render json: { success: true, data: data }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      # Recebe a semana INTEIRA de shifts (o front manda todos os dias, não só
+      # o que mudou — ver nota em Ifood::Client#update_opening_hours sobre por
+      # que o PUT sobrescreve tudo).
+      def update_opening_hours
+        shifts = params.require(:shifts).map do |s|
+          { dayOfWeek: s.require(:day_of_week), start: s.require(:start), duration: s.require(:duration) }
+        end
+        data = Ifood::Client.new.update_opening_hours(shifts)
+        render json: { success: true, data: data }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
       # Analytics — KPIs de pedidos. Requer o escopo "analytics" liberado
       # pelo iFood nas credenciais do app; sem ele, retorna 403 (não é bug —
       # ver Ifood::Client#order_kpis).

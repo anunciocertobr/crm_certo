@@ -102,6 +102,8 @@ Rails.application.routes.draw do
         get '/review_summary', to: 'ifood#review_summary'
         post '/reviews/:id/reply', to: 'ifood#reply_review'
         get '/analytics', to: 'ifood#analytics'
+        get '/opening_hours', to: 'ifood#opening_hours'
+        put '/opening_hours', to: 'ifood#update_opening_hours'
       end
       namespace :admin do
         get 'app_configs/:config_type', to: 'app_configs#show', as: :app_config
