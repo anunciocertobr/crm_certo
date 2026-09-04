@@ -391,7 +391,7 @@ class Api::V1::PipelinesController < Api::V1::BaseController
   def pipeline_params
     return @pipeline_params if defined?(@pipeline_params)
 
-    attributes = [:name, :description, :pipeline_type, :visibility]
+    attributes = [:name, :description, :pipeline_type, :visibility, :scope]
     # Activation is toggled through update only; a pipeline is always born active.
     attributes << :is_active if action_name == 'update'
 
