@@ -78,6 +78,7 @@ Rails.application.routes.draw do
         get '/interruptions', to: 'ifood#interruptions'
         post '/interruptions', to: 'ifood#create_interruption'
         delete '/interruptions/:id', to: 'ifood#destroy_interruption'
+        get '/merchants', to: 'ifood#merchants'
         get '/merchant_details', to: 'ifood#merchant_details'
         post '/close', to: 'ifood#close_store'
         post '/open', to: 'ifood#open_store'

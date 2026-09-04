@@ -137,6 +137,15 @@ module Api
         render json: { success: false, errors: [e.message] }, status: :bad_gateway
       end
 
+      # Lista todas as lojas vinculadas à conta (Cenário 1 de homologação
+      # Merchant: "liste todas as lojas vinculadas"). Disponibilidade de cada
+      # uma é consultada à parte (ver #status / merchant_status).
+      def merchants
+        render json: { success: true, data: Ifood::Client.new.merchants }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
       # Dados cadastrais da loja (razão social, endereço, tipo de operação) +
       # tempo médio de preparo, pra exibir no topo de Status & Pausas.
       def merchant_details
