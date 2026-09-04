@@ -1,6 +1,9 @@
+require 'cgi'
+
 class Integrations::App
   include Linear::IntegrationHelper
   include Hubspot::IntegrationHelper
+  include GoogleConcern
   attr_accessor :params
 
   def initialize(params)
@@ -38,6 +41,8 @@ class Integrations::App
       generate_linear_token(nil)
     when 'hubspot'
       generate_hubspot_token(nil)
+    when 'google_workspace'
+      generate_google_token('google_workspace')
     else
       nil
     end
@@ -52,6 +57,8 @@ class Integrations::App
       build_linear_action
     when 'hubspot'
       build_hubspot_action
+    when 'google_workspace'
+      build_google_workspace_action
     else
       params[:action]
     end
@@ -69,7 +76,7 @@ class Integrations::App
       GlobalConfigService.load('SHOPIFY_CLIENT_ID', nil).present?
     when 'leadsquared', 'bms'
       true
-    when 'webhook', 'dashboard_apps', 'openai'
+    when 'webhook', 'dashboard_apps', 'openai', 'gemini', 'google_workspace'
       true
     when 'oauth_applications'
       false
@@ -101,6 +108,62 @@ class Integrations::App
     ].join('&')
   end
 
+  # Drive/GTM/Ads leitura, além de email/profile pra identificar a conta
+  # conectada. access_type=offline + prompt=consent garantem o refresh_token
+  # (sem isso o Google só devolve um access_token de curta duração). Retorna
+  # nil enquanto o Client ID/Secret não tiverem sido cadastrados — a
+  # serialização usa .compact, então o card aparece sem `action` e o
+  # frontend mostra a tela de configuração em vez de tentar redirecionar
+  # pro Google.
+  def build_google_workspace_action
+    client_id = GlobalConfigService.load('GOOGLE_OAUTH_CLIENT_ID', nil)
+    return nil unless client_id.present?
+
+    # Escopos de escrita do GTM (edição de tags/acionadores/variáveis/pastas,
+    # criação de contêineres, versões e gerenciamento de usuários/permissões)
+    # substituem o antigo tagmanager.readonly — uma reconexão (prompt=consent)
+    # é necessária pra quem já tinha autorizado só leitura.
+    #
+    # `analytics.readonly` foi adicionado pro relatório de Google Analytics
+    # (dashboard de relatórios, ver Google::AnalyticsInsightsService) — dá
+    # pra reaproveitar esta mesma conexão porque a Data API do GA4 só exige
+    # OAuth normal, sem developer token (diferente do Google Ads: essa API
+    # tem token de desenvolvedor à parte, por isso usa uma credencial própria
+    # em Integrations::Hook(app_id: 'google_ads'), não esta conexão).
+    scope = [
+      'email',
+      'profile',
+      'https://www.googleapis.com/auth/drive.readonly',
+      'https://www.googleapis.com/auth/tagmanager.edit.containers',
+      'https://www.googleapis.com/auth/tagmanager.edit.containerversions',
+      'https://www.googleapis.com/auth/tagmanager.delete.containers',
+      'https://www.googleapis.com/auth/tagmanager.manage.accounts',
+      'https://www.googleapis.com/auth/tagmanager.manage.users',
+      'https://www.googleapis.com/auth/tagmanager.publish',
+      'https://www.googleapis.com/auth/analytics.readonly',
+      # analytics.edit — pro Setup GA4 (Google::Ga4InfrastructureService):
+      # criar conta/propriedade/stream, ativar Enhanced Measurement,
+      # dimensões, eventos de conversão, link com Google Ads e secret do
+      # Measurement Protocol. Precisa reconectar (prompt=consent) pra quem
+      # só tinha autorizado analytics.readonly antes.
+      'https://www.googleapis.com/auth/analytics.edit',
+      # youtube.upload — pro Gestor de Posts subir vídeo pro canal do
+      # YouTube conectado (ver Youtube::UploadService). Mesma reconexão
+      # necessária pra quem já autorizou antes sem esse escopo.
+      'https://www.googleapis.com/auth/youtube.upload'
+    ].join(' ')
+
+    [
+      "#{params[:action]}?response_type=code",
+      "client_id=#{client_id}",
+      "redirect_uri=#{CGI.escape(self.class.google_workspace_integration_url)}",
+      "scope=#{CGI.escape(scope)}",
+      "state=#{encode_state}",
+      'access_type=offline',
+      'prompt=consent'
+    ].join('&')
+  end
+
   def enabled?(_account = nil)
     case params[:id]
     when 'webhook'
@@ -128,6 +191,10 @@ class Integrations::App
 
   def self.hubspot_integration_url
     "#{ENV.fetch('FRONTEND_URL', nil)}/hubspot/callback"
+  end
+
+  def self.google_workspace_integration_url
+    "#{ENV.fetch('FRONTEND_URL', nil)}/settings/integrations/google-workspace/callback"
   end
 
   class << self
