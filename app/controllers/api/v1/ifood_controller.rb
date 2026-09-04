@@ -334,26 +334,51 @@ module Api
         render json: { success: false, errors: [e.message] }, status: :bad_gateway
       end
 
-      # Horário de funcionamento da loja — semana inteira.
+      # Horário de funcionamento da loja — semana inteira, inclusive blocos
+      # desativados (enabled: false) que existem só no nosso lado (ver
+      # Ifood::OpeningHoursDraft). Na primeira vez (sem draft salvo ainda),
+      # semeia a partir do que já está configurado de verdade no iFood.
       def opening_hours
-        data = Ifood::Client.new.opening_hours
-        render json: { success: true, data: data }
+        draft = Ifood::OpeningHoursDraft.load
+        if draft.blank?
+          real = Ifood::Client.new.opening_hours
+          draft = (real['shifts'] || []).map do |s|
+            { 'dayOfWeek' => s['dayOfWeek'], 'start' => s['start'], 'duration' => s['duration'], 'enabled' => true }
+          end
+          Ifood::OpeningHoursDraft.save(draft) if draft.present?
+        end
+        render json: { success: true, data: { shifts: draft } }
       rescue Ifood::Client::Error => e
         render json: { success: false, errors: [e.message] }, status: :bad_gateway
       end
 
-      # Recebe a semana INTEIRA de shifts (o front manda todos os dias, não só
-      # o que mudou — ver nota em Ifood::Client#update_opening_hours sobre por
-      # que o PUT sobrescreve tudo). `shifts: []` é um valor válido (apagar
-      # todos os blocos e salvar = fechar a loja todos os dias) — usar
-      # `params.require` aqui rejeitaria isso, já que Rails trata array vazio
-      # como "parâmetro ausente".
+      # Recebe a semana INTEIRA de blocos, ativos e desativados (o front manda
+      # todos os dias, não só o que mudou — ver nota em
+      # Ifood::Client#update_opening_hours sobre por que o PUT sobrescreve
+      # tudo). Só os blocos ativos vão pro iFood de verdade; os desativados
+      # ficam guardados aqui pra não precisar redigitar horário quando o
+      # usuário reabrir aquele bloco/dia depois.
       def update_opening_hours
         shifts = Array(params[:shifts]).map do |s|
-          { dayOfWeek: s.require(:day_of_week), start: s.require(:start), duration: s.require(:duration) }
+          {
+            'dayOfWeek' => s.require(:day_of_week),
+            'start' => s.require(:start),
+            'duration' => s.require(:duration),
+            'enabled' => s[:enabled].nil? ? true : ActiveModel::Type::Boolean.new.cast(s[:enabled])
+          }
         end
-        data = Ifood::Client.new.update_opening_hours(shifts)
-        render json: { success: true, data: data }
+        active = shifts.select { |s| s['enabled'] }
+        if active.empty?
+          render json: { success: false, errors: ['Deixe pelo menos um bloco ativo — o iFood não aceita a semana toda fechada.'] },
+                 status: :unprocessable_entity
+          return
+        end
+
+        data = Ifood::Client.new.update_opening_hours(
+          active.map { |s| { dayOfWeek: s['dayOfWeek'], start: s['start'], duration: s['duration'] } }
+        )
+        Ifood::OpeningHoursDraft.save(shifts)
+        render json: { success: true, data: { shifts: shifts, ifood: data } }
       rescue Ifood::Client::Error => e
         render json: { success: false, errors: [e.message] }, status: :bad_gateway
       end
