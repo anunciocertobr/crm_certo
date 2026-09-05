@@ -29,6 +29,7 @@ module Api
           end
 
           upload.media.attach(params[:media])
+          upload.thumbnail.attach(params[:thumb]) if params[:thumb].present?
 
           if upload.save
             ::GestorPosts::PublishJob.perform_later(upload.id, social_channel.class.name, social_channel.id)

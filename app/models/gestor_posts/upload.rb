@@ -27,6 +27,9 @@ module GestorPosts
     self.table_name = 'gestor_posts_uploads'
 
     has_one_attached :media
+    # Thumbnail customizada opcional, só usada em Reels do Instagram (cover_url
+    # na Graph API) — igual ao "Subir Thumbnail" do painel original.
+    has_one_attached :thumbnail
     belongs_to :creator, class_name: 'User', foreign_key: :created_by, inverse_of: false
 
     CONTENT_TYPES = %w[feed stories reels].freeze
@@ -57,6 +60,12 @@ module GestorPosts
       return nil unless media.attached?
 
       BlobUrlOptions.outbound_media_url(media.blob)
+    end
+
+    def public_thumbnail_url
+      return nil unless thumbnail.attached?
+
+      BlobUrlOptions.outbound_media_url(thumbnail.blob)
     end
 
     private

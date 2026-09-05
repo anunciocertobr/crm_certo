@@ -91,7 +91,10 @@ class Instagram::PublishService
   end
 
   def reels_params
-    { media_type: 'REELS', video_url: public_media_url, caption: upload.caption.to_s, share_to_feed: true }
+    params = { media_type: 'REELS', video_url: public_media_url, caption: upload.caption.to_s, share_to_feed: true }
+    thumb_url = upload.public_thumbnail_url
+    params[:cover_url] = thumb_url if thumb_url.present?
+    params
   end
 
   def publish_container(container_id)

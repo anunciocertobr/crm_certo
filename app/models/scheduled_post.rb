@@ -28,6 +28,7 @@ class ScheduledPost < ApplicationRecord
   self.table_name = 'scheduled_posts'
 
   has_one_attached :media
+  has_one_attached :thumbnail
   belongs_to :creator, class_name: 'User', foreign_key: :created_by, inverse_of: false
 
   CONTENT_TYPES = %w[feed stories reels].freeze
@@ -70,6 +71,12 @@ class ScheduledPost < ApplicationRecord
     return nil unless media.attached?
 
     BlobUrlOptions.outbound_media_url(media.blob)
+  end
+
+  def public_thumbnail_url
+    return nil unless thumbnail.attached?
+
+    BlobUrlOptions.outbound_media_url(thumbnail.blob)
   end
 
   def scheduled?

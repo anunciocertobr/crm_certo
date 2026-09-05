@@ -29,6 +29,7 @@ module Api
           # pode falhar a validação deixa a attachment órfã sem record_id.
           if post.save
             post.media.attach(params[:media])
+            post.thumbnail.attach(params[:thumb]) if params[:thumb].present?
             render json: { success: true, data: post.as_json(only: post_fields) }, status: :created
           else
             render json: { success: false, errors: post.errors.full_messages }, status: :unprocessable_entity
