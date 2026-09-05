@@ -273,6 +273,22 @@ en:
       name: 'LeadSquared'
       short_description: 'Sync your contacts and conversations with LeadSquared CRM.'
       description: 'Sync your contacts and conversations with LeadSquared CRM. This integration automatically creates leads in LeadSquared when new contacts are added, and logs conversation activity to provide your sales team with complete context.'
+    groq:
+      name: 'Groq'
+      short_description: 'Ultra-fast AI inference.'
+      description: 'Connect Groq for ultra-fast AI inference.'
+    google_ads:
+      name: 'Google Ads'
+      short_description: 'Manage ad campaigns and conversions.'
+      description: 'Connect Google Ads to manage campaigns and conversions.'
+    elevenlabs:
+      name: 'ElevenLabs'
+      short_description: 'Realistic AI voice audio generation.'
+      description: 'Connect ElevenLabs to generate realistic AI voice audio.'
+    huggingface:
+      name: 'Hugging Face'
+      short_description: 'Run open-source AI models.'
+      description: 'Connect Hugging Face to run open-source AI models.'
     bms:
       name: 'BMS (Brius For Message)'
       short_description: 'Sync your contacts, labels, custom attributes and campaigns with BMS.'

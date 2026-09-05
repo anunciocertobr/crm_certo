@@ -218,6 +218,22 @@ es:
       name: 'LeadSquared'
       short_description: 'Sync your contacts and conversations with LeadSquared CRM.'
       description: 'Sync your contacts and conversations with LeadSquared CRM. This integration automatically creates leads in LeadSquared when new contacts are added, and logs conversation activity to provide your sales team with complete context.'
+    groq:
+      name: 'Groq'
+      short_description: 'Inferencia de IA ultrarrápida.'
+      description: 'Conecta Groq para inferencia de IA ultrarrápida.'
+    google_ads:
+      name: 'Google Ads'
+      short_description: 'Gestiona campañas y conversiones.'
+      description: 'Conecta Google Ads para gestionar campañas y conversiones.'
+    elevenlabs:
+      name: 'ElevenLabs'
+      short_description: 'Generación de audio de voz realista con IA.'
+      description: 'Conecta ElevenLabs para generar audio de voz realista con IA.'
+    huggingface:
+      name: 'Hugging Face'
+      short_description: 'Ejecuta modelos de IA de código abierto.'
+      description: 'Conecta Hugging Face para ejecutar modelos de IA de código abierto.'
   captain:
     copilot_error: 'Conecte un asistente a esta bandeja de entrada para utilizar Copilot'
     copilot_limit: 'Te quedaste sin créditos de Copilot. Puedes comprar más créditos desde la sección de facturación.'

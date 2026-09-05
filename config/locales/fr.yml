@@ -218,6 +218,22 @@ fr:
       name: 'LeadSquared'
       short_description: 'Synchronisez vos contacts et conversations avec LeadSquared CRM.'
       description: 'Synchronisez vos contacts et conversations avec LeadSquared CRM. Cette intégration crée automatiquement des prospects dans LeadSquared lorsque de nouveaux contacts sont ajoutés, et enregistre l''activité des conversations pour fournir à votre équipe de vente un contexte complet.'
+    groq:
+      name: 'Groq'
+      short_description: 'Inférence IA ultra-rapide.'
+      description: 'Connectez Groq pour une inférence IA ultra-rapide.'
+    google_ads:
+      name: 'Google Ads'
+      short_description: 'Gérez les campagnes et les conversions.'
+      description: 'Connectez Google Ads pour gérer les campagnes et les conversions.'
+    elevenlabs:
+      name: 'ElevenLabs'
+      short_description: "Génération d'audio vocal IA réaliste."
+      description: "Connectez ElevenLabs pour générer de l'audio vocal IA réaliste."
+    huggingface:
+      name: 'Hugging Face'
+      short_description: "Exécutez des modèles d'IA open-source."
+      description: "Connectez Hugging Face pour exécuter des modèles d'IA open-source."
   captain:
     copilot_error: 'Please connect an assistant to this inbox to use Copilot'
     copilot_limit: 'You are out of Copilot credits. You can buy more credits from the billing section.'
