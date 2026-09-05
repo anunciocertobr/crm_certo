@@ -440,6 +440,7 @@ Rails.application.routes.draw do
         get '/gallery/demographics', to: 'gestor_posts/gallery#demographics'
         get '/gallery/peak_hours', to: 'gestor_posts/gallery#peak_hours'
         get '/gallery/stories', to: 'gestor_posts/gallery#stories'
+        delete '/gallery/media/:id', to: 'gestor_posts/gallery#destroy_media'
         get '/gallery/facebook_account_info', to: 'gestor_posts/gallery#facebook_account_info'
         get '/gallery/facebook_media', to: 'gestor_posts/gallery#facebook_media'
         get '/comments', to: 'gestor_posts/comments#index'

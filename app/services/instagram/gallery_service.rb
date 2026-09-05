@@ -47,6 +47,35 @@ class Instagram::GalleryService
     result['data'] || []
   end
 
+  # Excluir mídia publicada só existe na Graph API pra contas "Instagram com
+  # Login do Facebook" (Channel::FacebookPage) — não tem suporte pra Login
+  # direto do Instagram (Channel::Instagram). Exige a permissão
+  # instagram_manage_contents no token da página.
+  def delete_media(media_id)
+    unless channel.is_a?(Channel::FacebookPage)
+      raise Error, 'Excluir posts só é possível em contas conectadas via Login do Facebook.'
+    end
+
+    uri = URI("#{base_url}/#{media_id}")
+    uri.query = URI.encode_www_form(access_token: access_token)
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.read_timeout = 30
+    http.open_timeout = 10
+
+    response = http.request(Net::HTTP::Delete.new(uri.request_uri))
+    body = JSON.parse(response.body)
+
+    raise Error, "#{body.dig('error', 'code')} - #{body.dig('error', 'message')}" if body['error'].present?
+
+    body
+  rescue JSON::ParserError => e
+    raise Error, "Resposta inválida da Graph API: #{e.message}"
+  rescue Net::OpenTimeout, Net::ReadTimeout
+    raise Error, 'Tempo esgotado ao excluir o post.'
+  end
+
   # breakdown: "age,gender" ou "city"
   def demographics(breakdown:)
     get("#{account_id}/insights", metric: 'follower_demographics', period: 'lifetime',

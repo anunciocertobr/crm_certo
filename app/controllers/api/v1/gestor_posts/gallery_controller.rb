@@ -35,6 +35,13 @@ module Api
           render json: { success: false, errors: [e.message] }, status: :bad_gateway
         end
 
+        def destroy_media
+          result = service.delete_media(params[:id])
+          render json: { success: true, data: result }
+        rescue ::Instagram::GalleryService::Error => e
+          render json: { success: false, errors: [e.message] }, status: :bad_gateway
+        end
+
         def facebook_account_info
           render json: { success: true, data: facebook_service.account_info }
         rescue ::Facebook::GalleryService::Error => e
