@@ -111,6 +111,10 @@ Rails.application.routes.draw do
         post 'app_configs/:config_type', to: 'app_configs#create', as: :app_configs
         post 'app_configs/:config_type/test_connection', to: 'app_configs#test_connection', as: :test_app_config_connection
         delete 'app_configs/:config_type', to: 'app_configs#destroy', as: :destroy_app_config
+        get 'work_order_pipeline_config', to: 'work_order_pipeline_configs#show'
+        put 'work_order_pipeline_config', to: 'work_order_pipeline_configs#update'
+        resources :motoboys, only: [:index, :create, :update, :destroy]
+        resources :motoboy_deliveries, only: [:index, :create, :update, :destroy]
       end
 
       # Server-side proxy for the Marketing AI tools — keeps ElevenLabs/Groq/
@@ -144,6 +148,7 @@ Rails.application.routes.draw do
         post 'meta_infrastructure', to: 'meta_infrastructure#handle'
         post 'ga4_infrastructure', to: 'ga4_infrastructure#handle'
         post 'ads_infrastructure', to: 'ads_infrastructure#handle'
+        post 'google_calendar', to: 'google_calendar#handle'
         resources :whatsapp_ad_leads, only: [:index, :update]
       end
 

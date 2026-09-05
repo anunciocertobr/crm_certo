@@ -160,10 +160,16 @@ class Integrations::App
       # escopos.
       'https://www.googleapis.com/auth/youtube.upload',
       'https://www.googleapis.com/auth/youtube.readonly',
+      # calendar — pra ferramenta de Calendário em Meu Espaço (Google::CalendarService)
+      # sincronizar/criar eventos de verdade. Reaproveita esta mesma conexão
+      # (mesmo Client ID do Google Cloud já usado pra GTM/GA4/YouTube) em vez
+      # de um app OAuth separado — precisa reconectar (prompt=consent) pra
+      # quem já tinha autorizado antes sem esse escopo.
+      'https://www.googleapis.com/auth/calendar',
       # business.manage — pro Google Meu Negócio (Business Profile), que o
-      # Gestor de Posts vai passar a usar (editar o perfil da empresa e
-      # publicar posts nele). Pedido já junto agora pra quem reconectar não
-      # precisar de mais uma reconexão quando essa integração entrar.
+      # Gestor de Posts vai passar a usar (publicar/gerenciar posts do
+      # perfil da empresa no Google) — pedido junto agora pra não precisar
+      # de mais uma reconexão quando essa integração for implementada.
       'https://www.googleapis.com/auth/business.manage'
     ].join(' ')
 
