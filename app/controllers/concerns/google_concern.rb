@@ -1,6 +1,13 @@
 module GoogleConcern
   extend ActiveSupport::Concern
 
+  # 2026-09-05: um token exchange sem timeout travou aqui indefinidamente
+  # (rede lenta pro Google), e como o Puma roda em modo single com poucas
+  # threads, isso derrubou a API inteira (todo mundo, não só quem tentava
+  # conectar o Google) até o serviço ser reiniciado manualmente. connection_opts
+  # garante que qualquer chamada por este client (aqui e no refresh de token em
+  # Google::WorkspaceTokenService, que usa este mesmo client) falha rápido em
+  # vez de travar uma thread do Puma pra sempre.
   def google_client
     app_id = GlobalConfigService.load('GOOGLE_OAUTH_CLIENT_ID', nil)
     app_secret = GlobalConfigService.load('GOOGLE_OAUTH_CLIENT_SECRET', nil)
@@ -8,7 +15,8 @@ module GoogleConcern
     ::OAuth2::Client.new(app_id, app_secret, {
                            site: 'https://oauth2.googleapis.com',
                            authorize_url: 'https://accounts.google.com/o/oauth2/auth',
-                           token_url: 'https://accounts.google.com/o/oauth2/token'
+                           token_url: 'https://accounts.google.com/o/oauth2/token',
+                           connection_opts: { request: { open_timeout: 10, timeout: 15 } }
                          })
   end
 
