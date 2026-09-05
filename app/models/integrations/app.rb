@@ -152,9 +152,14 @@ class Integrations::App
       # só tinha autorizado analytics.readonly antes.
       'https://www.googleapis.com/auth/analytics.edit',
       # youtube.upload — pro Gestor de Posts subir vídeo pro canal do
-      # YouTube conectado (ver Youtube::UploadService). Mesma reconexão
-      # necessária pra quem já autorizou antes sem esse escopo.
-      'https://www.googleapis.com/auth/youtube.upload'
+      # YouTube conectado (ver Youtube::UploadService). youtube.readonly —
+      # pra listar canal/vídeos existentes na galeria (ver
+      # Youtube::GalleryService); upload sozinho não é suficiente pra
+      # channels.list/playlistItems.list, retorna insufficientPermissions.
+      # Mesma reconexão necessária pra quem já autorizou antes sem esses
+      # escopos.
+      'https://www.googleapis.com/auth/youtube.upload',
+      'https://www.googleapis.com/auth/youtube.readonly'
     ].join(' ')
 
     [

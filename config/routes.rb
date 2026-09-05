@@ -439,6 +439,8 @@ Rails.application.routes.draw do
         get '/gallery/media', to: 'gestor_posts/gallery#media'
         get '/gallery/demographics', to: 'gestor_posts/gallery#demographics'
         get '/gallery/peak_hours', to: 'gestor_posts/gallery#peak_hours'
+        get '/gallery/facebook_account_info', to: 'gestor_posts/gallery#facebook_account_info'
+        get '/gallery/facebook_media', to: 'gestor_posts/gallery#facebook_media'
         get '/comments', to: 'gestor_posts/comments#index'
         post '/comments/reply', to: 'gestor_posts/comments#reply'
         get '/publications', to: 'gestor_posts/publications#index'
@@ -454,6 +456,8 @@ Rails.application.routes.draw do
         get '/whatsapp_status/channels', to: 'gestor_posts/whatsapp_status#channels'
         post '/whatsapp_status', to: 'gestor_posts/whatsapp_status#create'
         get '/youtube/connected', to: 'gestor_posts/youtube#connected'
+        get '/youtube/account_info', to: 'gestor_posts/youtube#account_info'
+        get '/youtube/videos', to: 'gestor_posts/youtube#videos'
         post '/youtube', to: 'gestor_posts/youtube#create'
         get '/youtube/:id', to: 'gestor_posts/youtube#show'
       end

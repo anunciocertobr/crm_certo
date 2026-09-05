@@ -6,6 +6,18 @@ module Api
           render json: { success: true, data: { connected: Google::WorkspaceTokenService.new.connected? } }
         end
 
+        def account_info
+          render json: { success: true, data: ::Youtube::GalleryService.new.account_info }
+        rescue ::Youtube::GalleryService::Error => e
+          render json: { success: false, errors: [e.message] }, status: :bad_gateway
+        end
+
+        def videos
+          render json: { success: true, data: ::Youtube::GalleryService.new.videos(limit: (params[:limit] || 25).to_i) }
+        rescue ::Youtube::GalleryService::Error => e
+          render json: { success: false, errors: [e.message] }, status: :bad_gateway
+        end
+
         def create
           if params[:video].blank?
             return render json: { success: false, errors: ['Arquivo de vídeo é obrigatório.'] }, status: :unprocessable_entity

@@ -29,10 +29,26 @@ module Api
           render json: { success: false, errors: [e.message] }, status: :bad_gateway
         end
 
+        def facebook_account_info
+          render json: { success: true, data: facebook_service.account_info }
+        rescue ::Facebook::GalleryService::Error => e
+          render json: { success: false, errors: [e.message] }, status: :bad_gateway
+        end
+
+        def facebook_media
+          render json: { success: true, data: facebook_service.media(limit: (params[:limit] || 25).to_i) }
+        rescue ::Facebook::GalleryService::Error => e
+          render json: { success: false, errors: [e.message] }, status: :bad_gateway
+        end
+
         private
 
         def service
           @service ||= ::Instagram::GalleryService.new(channel: social_channel)
+        end
+
+        def facebook_service
+          @facebook_service ||= ::Facebook::GalleryService.new(channel: social_channel)
         end
       end
     end
