@@ -159,7 +159,12 @@ class Integrations::App
       # Mesma reconexão necessária pra quem já autorizou antes sem esses
       # escopos.
       'https://www.googleapis.com/auth/youtube.upload',
-      'https://www.googleapis.com/auth/youtube.readonly'
+      'https://www.googleapis.com/auth/youtube.readonly',
+      # business.manage — pro Google Meu Negócio (Business Profile), que o
+      # Gestor de Posts vai passar a usar (editar o perfil da empresa e
+      # publicar posts nele). Pedido já junto agora pra quem reconectar não
+      # precisar de mais uma reconexão quando essa integração entrar.
+      'https://www.googleapis.com/auth/business.manage'
     ].join(' ')
 
     [
