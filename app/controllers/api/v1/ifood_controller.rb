@@ -17,6 +17,12 @@ module Api
         # salesChannel, ex. ifood-app) — não um objeto único.
         statuses = merchant && client.merchant_status(merchant['id'])
         primary_status = statuses.is_a?(Array) ? statuses.first : statuses
+        # `message.title` no nível raiz costuma ser só "Loja fechada" — o
+        # motivo de verdade (pausa, fora do horário, integração sem enviar
+        # heartbeat via #events:polling, etc.) vem em `validations[]`. Prefere
+        # a primeira validação que não está OK.
+        failing_validation = primary_status && (primary_status['validations'] || []).find { |v| v['state'] != 'OK' }
+        status_message = failing_validation&.dig('message', 'title') || primary_status&.dig('message', 'title')
 
         render json: {
           success: true,
@@ -25,7 +31,7 @@ module Api
             merchant_id: merchant && merchant['id'],
             merchant_name: merchant && merchant['name'],
             available: primary_status && primary_status['state'] == 'OK',
-            status_message: primary_status && primary_status.dig('message', 'title')
+            status_message: status_message
           }
         }
       rescue Ifood::Client::Error => e

@@ -116,3 +116,12 @@ scheduled_posts_processor_job:
   cron: '* * * * *'
   class: 'ScheduledPostsProcessorJob'
   queue: scheduled_jobs
+
+# executed every minute to poll iFood order events — required as a
+# heartbeat, or the iFood platform marks the store as disconnected
+# ("is.not.connected.config") and shows it closed regardless of hours/pauses
+ifood_poll_events_job:
+  cron: '* * * * *'
+  class: 'Ifood::PollEventsJob'
+  queue: scheduled_jobs
+  description: 'Keep the iFood integration connected by polling order events regularly'
