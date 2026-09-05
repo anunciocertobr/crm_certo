@@ -177,10 +177,11 @@ class Integrations::App
   # não tem como vir do login), mas é uma credencial única do sistema
   # (GlobalConfig GOOGLE_ADS_DEVELOPER_TOKEN), não uma por conta.
   #
-  # IMPORTANTE: a redirect_uri abaixo precisa estar cadastrada nas "Authorized
-  # redirect URIs" do client OAuth no Google Cloud Console (mesma tela onde já
-  # está a URL do google_workspace) — sem isso o Google recusa o login com
-  # redirect_uri_mismatch.
+  # redirect_uri é a MESMA já cadastrada pro google_workspace (não uma nova) —
+  # Api::V1::Integrations::GoogleWorkspaceAuthorizationsController#callback
+  # olha o identifier decodificado do state (não a URL) pra saber que é um
+  # login de Ads e salvar no hook certo. Evita ter que cadastrar mais uma
+  # "Authorized redirect URI" no Google Cloud Console.
   def build_google_ads_action
     client_id = GlobalConfigService.load('GOOGLE_OAUTH_CLIENT_ID', nil)
     return nil unless client_id.present?
@@ -190,7 +191,7 @@ class Integrations::App
     [
       "#{params[:action]}?response_type=code",
       "client_id=#{client_id}",
-      "redirect_uri=#{CGI.escape(self.class.google_ads_integration_url)}",
+      "redirect_uri=#{CGI.escape(self.class.google_workspace_integration_url)}",
       "scope=#{CGI.escape(scope)}",
       "state=#{encode_state}",
       'access_type=offline',
@@ -229,10 +230,6 @@ class Integrations::App
 
   def self.google_workspace_integration_url
     "#{ENV.fetch('FRONTEND_URL', nil)}/settings/integrations/google-workspace/callback"
-  end
-
-  def self.google_ads_integration_url
-    "#{ENV.fetch('FRONTEND_URL', nil)}/settings/integrations/google-ads/callback"
   end
 
   class << self

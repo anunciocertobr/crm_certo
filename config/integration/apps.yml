@@ -381,6 +381,7 @@ google_ads:
           "email": { "type": "string" },
           "access_token": { "type": "string" },
           "refresh_token": { "type": "string" },
+          "scope": { "type": "string" },
           "expires_on": { "type": "string" },
           "customer_id": { "type": "string" },
           "login_customer_id": { "type": "string" }
