@@ -120,8 +120,12 @@ Rails.application.routes.draw do
       scope path: 'tools_proxy', controller: 'tools_proxy' do
         post 'elevenlabs/text_to_speech', action: :elevenlabs_text_to_speech
         post 'groq/chat_completions', action: :groq_chat_completions
+        post 'openai/chat_completions', action: :openai_chat_completions
         post 'gemini/generate_content', action: :gemini_generate_content
         post 'huggingface/infer', action: :huggingface_infer
+        get 'groq/models', action: :groq_models
+        get 'openai/models', action: :openai_models
+        get 'gemini/models', action: :gemini_models
       end
 
       # Relatórios do Dashboard (Meta Ads + Leads + Google Ads + Analytics)

@@ -15,7 +15,12 @@ class Ai::ConsumerCompatibility
     inbox_assist: Ai::Credential::OPENAI_COMPATIBLE_PROVIDERS,
     audio_transcription: Ai::Credential::OPENAI_COMPATIBLE_PROVIDERS,
     label_suggestion: Ai::Credential::OPENAI_COMPATIBLE_PROVIDERS,
-    moderation: Ai::Credential::OPENAI_COMPATIBLE_PROVIDERS
+    moderation: Ai::Credential::OPENAI_COMPATIBLE_PROVIDERS,
+    # ToolsProxyController#openai_chat_completions — the Marketing AI tools'
+    # "ChatGPT" option. Groq/Gemini go through their own Integrations::Hook
+    # (see require_key!); only OpenAI has no hook-based key input anymore
+    # (apps.yml moved it to this registry), so this is the only way to reach it.
+    marketing_ai_tools: Ai::Credential::OPENAI_COMPATIBLE_PROVIDERS
   }.freeze
 
   class << self
