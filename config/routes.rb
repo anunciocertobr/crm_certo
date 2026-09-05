@@ -590,6 +590,9 @@ Rails.application.routes.draw do
       # colidiria e nunca chegaria no Rails. Mantém o padrão top-level já usado
       # por google/callback, microsoft/callback etc. acima.
       post 'google_workspace/callback', to: 'integrations/google_workspace_authorizations#callback'
+      post 'google_ads/callback', to: 'integrations/google_ads_authorizations#callback'
+      get 'google_ads/accessible_customers', to: 'integrations/google_ads_authorizations#accessible_customers'
+      post 'google_ads/select_customer', to: 'integrations/google_ads_authorizations#select_customer'
 
       scope path: 'instagram', as: 'instagram' do
         resource :authorization, only: [:create], controller: 'instagram/authorizations'

@@ -43,6 +43,8 @@ class Integrations::App
       generate_hubspot_token(nil)
     when 'google_workspace'
       generate_google_token('google_workspace')
+    when 'google_ads'
+      generate_google_token('google_ads')
     else
       nil
     end
@@ -59,6 +61,8 @@ class Integrations::App
       build_hubspot_action
     when 'google_workspace'
       build_google_workspace_action
+    when 'google_ads'
+      build_google_ads_action
     else
       params[:action]
     end
@@ -164,6 +168,36 @@ class Integrations::App
     ].join('&')
   end
 
+  # Google Ads reaproveita o MESMO app OAuth do Google (GOOGLE_OAUTH_CLIENT_ID/
+  # SECRET, o app já usado por google_workspace) em vez de pedir um client_id/
+  # secret/refresh_token à parte por conta — o usuário só faz login com o
+  # Google e escolhe a conta de anúncios depois (ver
+  # Api::V1::Integrations::GoogleAdsAuthorizationsController). O
+  # developer_token continua obrigatório (exigência própria da Google Ads API,
+  # não tem como vir do login), mas é uma credencial única do sistema
+  # (GlobalConfig GOOGLE_ADS_DEVELOPER_TOKEN), não uma por conta.
+  #
+  # IMPORTANTE: a redirect_uri abaixo precisa estar cadastrada nas "Authorized
+  # redirect URIs" do client OAuth no Google Cloud Console (mesma tela onde já
+  # está a URL do google_workspace) — sem isso o Google recusa o login com
+  # redirect_uri_mismatch.
+  def build_google_ads_action
+    client_id = GlobalConfigService.load('GOOGLE_OAUTH_CLIENT_ID', nil)
+    return nil unless client_id.present?
+
+    scope = ['email', 'profile', 'https://www.googleapis.com/auth/adwords'].join(' ')
+
+    [
+      "#{params[:action]}?response_type=code",
+      "client_id=#{client_id}",
+      "redirect_uri=#{CGI.escape(self.class.google_ads_integration_url)}",
+      "scope=#{CGI.escape(scope)}",
+      "state=#{encode_state}",
+      'access_type=offline',
+      'prompt=consent'
+    ].join('&')
+  end
+
   def enabled?(_account = nil)
     case params[:id]
     when 'webhook'
@@ -195,6 +229,10 @@ class Integrations::App
 
   def self.google_workspace_integration_url
     "#{ENV.fetch('FRONTEND_URL', nil)}/settings/integrations/google-workspace/callback"
+  end
+
+  def self.google_ads_integration_url
+    "#{ENV.fetch('FRONTEND_URL', nil)}/settings/integrations/google-ads/callback"
   end
 
   class << self

@@ -6,8 +6,10 @@ require 'net/http'
 # lista de remarketing, sitelink, vínculo com o MCC) que originalmente só
 # simulava as chamadas com IDs de Math.random(). Usa a mesma credencial de
 # Integrations::Hook(app_id: 'google_ads') do Google::AdsInsightsService —
-# client_id/secret/refresh_token (OAuth do app Ads, separado do Google
-# Login), developer_token e login_customer_id (o MCC).
+# refresh_token do login real com o Google, client_id/secret do app OAuth
+# compartilhado (GOOGLE_OAUTH_CLIENT_ID/SECRET), developer_token único do
+# sistema (GlobalConfig GOOGLE_ADS_DEVELOPER_TOKEN) e login_customer_id (o
+# MCC, opcional, escolhido junto com o customer_id).
 class Google::AdsInfrastructureService
   TOKEN_URL = 'https://www.googleapis.com/oauth2/v3/token'
   BASE_URL = 'https://googleads.googleapis.com/v19'
@@ -114,7 +116,7 @@ class Google::AdsInfrastructureService
 
     request = Net::HTTP::Post.new(uri.request_uri)
     request['Authorization'] = "Bearer #{token}"
-    request['developer-token'] = settings['developer_token']
+    request['developer-token'] = GlobalConfigService.load('GOOGLE_ADS_DEVELOPER_TOKEN', nil)
     request['login-customer-id'] = login_customer_id if login_customer_id.present?
     request['Content-Type'] = 'application/json'
     request.body = body.to_json
@@ -139,8 +141,8 @@ class Google::AdsInfrastructureService
     uri = URI(TOKEN_URL)
     response = Net::HTTP.post_form(uri, {
                                       'grant_type' => 'refresh_token',
-                                      'client_id' => settings['client_id'],
-                                      'client_secret' => settings['client_secret'],
+                                      'client_id' => GlobalConfigService.load('GOOGLE_OAUTH_CLIENT_ID', nil),
+                                      'client_secret' => GlobalConfigService.load('GOOGLE_OAUTH_CLIENT_SECRET', nil),
                                       'refresh_token' => settings['refresh_token']
                                     })
     return nil unless response.code.to_i.between?(200, 299)

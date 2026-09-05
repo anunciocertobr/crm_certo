@@ -559,6 +559,15 @@
   description: 'Google OAuth Callback URL'
 ## ------ End of Configs added for Google OAuth ------ ##
 
+## ------ Configs added for Google Ads ------ ##
+- name: GOOGLE_ADS_DEVELOPER_TOKEN
+  display_title: 'Google Ads Developer Token'
+  value:
+  locked: false
+  description: 'Developer Token da API do Google Ads (Centro de API da conta gerenciadora/MCC) — único para o sistema, não por conta conectada'
+  type: secret
+## ------ End of Configs added for Google Ads ------ ##
+
 ## ------ Configs added for BMS ------ ##
 - name: BMS_API_SECRET
   display_title: 'BMS API Secret'
