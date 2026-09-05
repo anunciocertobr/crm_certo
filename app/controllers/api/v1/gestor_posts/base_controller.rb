@@ -15,6 +15,19 @@ module Api
           render json: { success: true, data: instagram + facebook_pages }
         end
 
+        # TODAS as páginas do Facebook já conectadas como canal aqui, com ou
+        # sem Instagram vinculado — diferente de #channels acima, que só
+        # inclui as com Instagram (usado pelas telas específicas do
+        # Instagram). Esta é a lista usada pelo seletor de página do
+        # Facebook no Gestor de Posts.
+        def facebook_channels
+          data = Channel::FacebookPage.all.map do |c|
+            { channel_type: 'Channel::FacebookPage', channel_id: c.id, username: c.instagram_id || c.inbox&.name || c.page_id, page_id: c.page_id }
+          end
+
+          render json: { success: true, data: data }
+        end
+
         private
 
         def social_channel

@@ -435,6 +435,9 @@ Rails.application.routes.draw do
 
       scope :gestor_posts, as: :gestor_posts do
         get '/channels', to: 'gestor_posts/base#channels'
+        get '/facebook_channels', to: 'gestor_posts/base#facebook_channels'
+        get '/facebook_pages/accessible', to: 'gestor_posts/facebook_pages#accessible'
+        post '/facebook_pages/connect', to: 'gestor_posts/facebook_pages#connect'
         get '/gallery/account_info', to: 'gestor_posts/gallery#account_info'
         get '/gallery/media', to: 'gestor_posts/gallery#media'
         get '/gallery/demographics', to: 'gestor_posts/gallery#demographics'
