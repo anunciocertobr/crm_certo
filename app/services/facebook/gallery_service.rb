@@ -30,6 +30,29 @@ class Facebook::GalleryService
     result['data'] || []
   end
 
+  # DELETE /{post-id} com o token da página — endpoint padrão da Graph API
+  # pra apagar um post publicado nela, exige a permissão pages_manage_posts.
+  def delete_media(post_id)
+    uri = URI("#{base_url}/#{post_id}")
+    uri.query = URI.encode_www_form(access_token: access_token)
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.read_timeout = 30
+    http.open_timeout = 10
+
+    response = http.request(Net::HTTP::Delete.new(uri.request_uri))
+    body = JSON.parse(response.body)
+
+    raise Error, "#{body.dig('error', 'code')} - #{body.dig('error', 'message')}" if body['error'].present?
+
+    body
+  rescue JSON::ParserError => e
+    raise Error, "Resposta inválida da Graph API: #{e.message}"
+  rescue Net::OpenTimeout, Net::ReadTimeout
+    raise Error, 'Tempo esgotado ao excluir o post.'
+  end
+
   private
 
   def access_token
