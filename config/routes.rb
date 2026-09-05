@@ -447,6 +447,7 @@ Rails.application.routes.draw do
         get '/gallery/facebook_account_info', to: 'gestor_posts/gallery#facebook_account_info'
         get '/gallery/facebook_media', to: 'gestor_posts/gallery#facebook_media'
         delete '/gallery/facebook_media/:id', to: 'gestor_posts/gallery#destroy_facebook_media'
+        get '/gallery/facebook_stories', to: 'gestor_posts/gallery#facebook_stories'
         get '/comments', to: 'gestor_posts/comments#index'
         post '/comments/reply', to: 'gestor_posts/comments#reply'
         get '/publications', to: 'gestor_posts/publications#index'

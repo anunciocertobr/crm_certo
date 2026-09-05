@@ -61,6 +61,12 @@ module Api
           render json: { success: false, errors: [e.message] }, status: :bad_gateway
         end
 
+        def facebook_stories
+          render json: { success: true, data: facebook_service.stories }
+        rescue ::Facebook::GalleryService::Error => e
+          render json: { success: false, errors: [e.message] }, status: :bad_gateway
+        end
+
         private
 
         def service
