@@ -24,13 +24,23 @@ module Api
         failing_validation = primary_status && (primary_status['validations'] || []).find { |v| v['state'] != 'OK' }
         status_message = failing_validation&.dig('message', 'title') || primary_status&.dig('message', 'title')
 
+        # GET /merchants/:id/status NÃO considera pausas manuais (confirmado
+        # contra a API real e contra o próprio Portal do Parceiro: uma pausa
+        # ativa não aparece nas validations nem muda o badge "Loja aberta" lá).
+        # Por isso cruzamos com as interrupções ativas agora, do jeito que
+        # Ifood::Client#open_store já faz pra decidir o que remover.
+        active_interruption = merchant && find_active_interruption(client, merchant['id'])
+        if active_interruption
+          status_message = "Pausada: #{active_interruption['description']}"
+        end
+
         render json: {
           success: true,
           data: {
             connected: true,
             merchant_id: merchant && merchant['id'],
             merchant_name: merchant && merchant['name'],
-            available: primary_status && primary_status['state'] == 'OK',
+            available: primary_status && primary_status['state'] == 'OK' && active_interruption.nil?,
             status_message: status_message
           }
         }
@@ -506,6 +516,15 @@ module Api
         render json: { success: true, data: IfoodOrderSerializer.serialize(@order) }
       rescue Ifood::Client::Error => e
         render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      def find_active_interruption(client, merchant_id)
+        now = Time.current
+        client.interruptions(merchant_id).find do |i|
+          Time.zone.parse(i['start']) <= now && now <= Time.zone.parse(i['end'])
+        rescue ArgumentError, TypeError
+          false
+        end
       end
     end
   end
