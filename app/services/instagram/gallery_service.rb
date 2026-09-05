@@ -18,6 +18,12 @@ class Instagram::GalleryService
                  'insights.metric(impressions,reach,saved,shares,views,total_interactions,profile_visits,follows,' \
                  'ig_reels_avg_watch_time)'.freeze
   ACCOUNT_FIELDS = 'followers_count,username,biography,name,profile_picture_url,media_count,follows_count,website'.freeze
+  # "Destaques" (Highlights) não existe na Graph API pra apps de terceiros —
+  # é um recurso interno do app do Instagram, nunca foi aberto pra
+  # desenvolvedores. O mais próximo que a API permite ler são os Stories
+  # ATIVOS (desaparecem da API depois de 24h, mesmo que salvos como
+  # destaque no perfil).
+  STORY_FIELDS = 'id,media_type,media_url,thumbnail_url,permalink,timestamp'.freeze
 
   class Error < StandardError; end
 
@@ -33,6 +39,11 @@ class Instagram::GalleryService
 
   def media(limit: 25)
     result = get("#{account_id}/media", fields: MEDIA_FIELDS, limit: limit)
+    result['data'] || []
+  end
+
+  def stories
+    result = get("#{account_id}/stories", fields: STORY_FIELDS)
     result['data'] || []
   end
 
