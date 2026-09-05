@@ -467,6 +467,15 @@ Rails.application.routes.draw do
         get '/youtube/videos', to: 'gestor_posts/youtube#videos'
         post '/youtube', to: 'gestor_posts/youtube#create'
         get '/youtube/:id', to: 'gestor_posts/youtube#show'
+        get '/business_profile/connected', to: 'gestor_posts/business_profile#connected'
+        get '/business_profile/locations', to: 'gestor_posts/business_profile#locations'
+        get '/business_profile/location', to: 'gestor_posts/business_profile#location'
+        patch '/business_profile/location', to: 'gestor_posts/business_profile#update_location'
+        get '/business_profile/categories', to: 'gestor_posts/business_profile#search_categories'
+        get '/business_profile/posts', to: 'gestor_posts/business_profile#posts'
+        post '/business_profile/posts', to: 'gestor_posts/business_profile#create'
+        get '/business_profile/posts/:id', to: 'gestor_posts/business_profile#show'
+        delete '/business_profile/posts', to: 'gestor_posts/business_profile#destroy_post'
       end
 
       # Authenticated CONFIG surface of the purchase-webhook ingress (CRM-493):
