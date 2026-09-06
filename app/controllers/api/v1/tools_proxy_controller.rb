@@ -16,7 +16,11 @@ class Api::V1::ToolsProxyController < Api::V1::BaseController
   ELEVENLABS_BASE = 'https://api.elevenlabs.io'
   GROQ_BASE = 'https://api.groq.com'
   GEMINI_BASE = 'https://generativelanguage.googleapis.com'
-  HUGGINGFACE_BASE = 'https://api-inference.huggingface.co'
+  # Hugging Face desativou api-inference.huggingface.co (a "Inference API"
+  # legada) e migrou tudo pro roteador novo — mesma rota /models/:model, host
+  # diferente. Sem isso, toda chamada falhava com erro de DNS
+  # (Socket::ResolutionError), não um erro da Hugging Face.
+  HUGGINGFACE_BASE = 'https://router.huggingface.co/hf-inference'
 
   # POST /api/v1/tools_proxy/elevenlabs/text_to_speech
   # body: { text, voice_id, model_id? }
@@ -53,6 +57,83 @@ class Api::V1::ToolsProxyController < Api::V1::BaseController
     response = HTTParty.post(
       "#{GROQ_BASE}/openai/v1/chat/completions",
       headers: { 'Content-Type' => 'application/json', 'Authorization' => "Bearer #{key}" },
+      body: body.to_json
+    )
+
+    forward_json(response)
+  end
+
+  # POST /api/v1/tools_proxy/groq/text_to_speech
+  # body: { text, voice, model? }
+  # Groq's TTS is OpenAI-compatible (POST .../audio/speech). PlayAI (playai-tts)
+  # was decommissioned; canopylabs/orpheus-v1-english is the current model, but
+  # it needs the org admin to accept its terms once at
+  # https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english
+  # (a real per-account gate on Groq's side — the request 400s with
+  # `model_terms_required` until that's done, same shape as the Meta Custom
+  # Audiences ToS gate).
+  def groq_text_to_speech
+    key = require_key!('groq', 'Groq')
+    return if key.nil?
+
+    response = HTTParty.post(
+      "#{GROQ_BASE}/openai/v1/audio/speech",
+      headers: { 'Content-Type' => 'application/json', 'Authorization' => "Bearer #{key}" },
+      body: {
+        model: params[:model].presence || 'canopylabs/orpheus-v1-english',
+        voice: params[:voice].presence || 'tara',
+        input: params.require(:text),
+        response_format: 'mp3'
+      }.to_json
+    )
+
+    forward_binary(response, 'audio/mpeg')
+  end
+
+  # POST /api/v1/tools_proxy/openai/text_to_speech
+  # body: { text, voice, model? }
+  def openai_text_to_speech
+    endpoint = openai_endpoint
+    return if endpoint.nil?
+
+    response = HTTParty.post(
+      "#{endpoint.base_url.presence || 'https://api.openai.com'}/v1/audio/speech",
+      headers: { 'Content-Type' => 'application/json', 'Authorization' => "Bearer #{endpoint.key}" },
+      body: {
+        model: params[:model].presence || 'tts-1',
+        voice: params[:voice].presence || 'alloy',
+        input: params.require(:text),
+        response_format: 'mp3'
+      }.to_json
+    )
+
+    forward_binary(response, 'audio/mpeg')
+  end
+
+  # POST /api/v1/tools_proxy/openai/generate_image
+  # body: { prompt, model?, size? }
+  # Gerador de Imagem was Gemini-only (and unusable whenever the Gemini
+  # credential isn't set, as on this account) — this gives it a second real
+  # provider on the same OpenAI credential the text/TTS proxies already use.
+  # gpt-image-1 always returns b64_json; dall-e-3/dall-e-2 return a URL by
+  # default, so response_format is pinned to b64_json for those two to keep
+  # the frontend's handling uniform across models.
+  def openai_generate_image
+    endpoint = openai_endpoint
+    return if endpoint.nil?
+
+    model = params[:model].presence || 'gpt-image-1'
+    body = {
+      model: model,
+      prompt: params.require(:prompt),
+      size: params[:size].presence || '1024x1024',
+      n: 1
+    }
+    body[:response_format] = 'b64_json' if model != 'gpt-image-1'
+
+    response = HTTParty.post(
+      "#{endpoint.base_url.presence || 'https://api.openai.com'}/v1/images/generations",
+      headers: { 'Content-Type' => 'application/json', 'Authorization' => "Bearer #{endpoint.key}" },
       body: body.to_json
     )
 
@@ -148,7 +229,7 @@ class Api::V1::ToolsProxyController < Api::V1::BaseController
     )
 
     content_type = response.headers['content-type'].to_s
-    if content_type.include?('image')
+    if content_type.include?('image') || content_type.include?('audio')
       forward_binary(response, content_type)
     else
       forward_json(response)
