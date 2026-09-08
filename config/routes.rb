@@ -399,6 +399,7 @@ Rails.application.routes.draw do
         end
         resources :variants, controller: 'products/variants', only: [:index, :create, :update, :destroy]
         post :sell, on: :member
+        get :calcular_imposto, on: :member
       end
 
       # Product categories (catalog, autocomplete + create from the product modal).

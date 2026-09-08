@@ -7,10 +7,11 @@ class Api::V1::ProductsController < Api::V1::BaseController
                         destroy: 'products.delete',
                         bulk: 'products.create',
                         sell: 'products.update',
-                        import_fetch: 'products.create'
+                        import_fetch: 'products.create',
+                        calcular_imposto: 'products.read'
                       })
 
-  before_action :fetch_product, only: %i[show update destroy]
+  before_action :fetch_product, only: %i[show update destroy calcular_imposto]
 
   def index
     @products = filtered_products
@@ -146,6 +147,19 @@ class Api::V1::ProductsController < Api::V1::BaseController
     )
   end
 
+  # Estimativa de impostos (IBS/CBS + legado) pra este produto — ver
+  # Tax::CalculationService pra como cada alíquota é resolvida.
+  def calcular_imposto
+    quantity = params[:quantity].presence || 1
+    unit_price = params[:unit_price].presence
+
+    result = Tax::CalculationService.new(
+      product: @product, quantity: quantity, unit_price: unit_price
+    ).calculate
+
+    success_response(data: result.to_h, message: 'Cálculo de imposto estimado')
+  end
+
   private
 
   def fetch_product
@@ -243,6 +257,9 @@ class Api::V1::ProductsController < Api::V1::BaseController
         :item_type, :ml_category, :ml_buying_model,
         :ml_listing_type, :ml_condition, :brand, :model,
         :compatible_brands, :accessory_type, :anatel_number, :publish_ml,
+        :ncm, :cest, :cfop_padrao, :cst_icms, :csosn, :cst_pis_cofins,
+        :cst_ibs_cbs, :cclasstrib, :reducao_ibs_cbs_pct,
+        :sujeito_imposto_seletivo, :aliquota_imposto_seletivo_pct,
         metadata: {},
         media: [:id, :kind, :source, :url],
         variants_attributes: [
