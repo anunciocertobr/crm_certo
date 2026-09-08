@@ -1,4 +1,5 @@
 require 'net/http'
+require 'cgi'
 
 # Google::CalendarService — conecta com o Google Calendar (agenda "primary")
 # reaproveitando a MESMA conexão OAuth "Google Workspace" já usada por
@@ -20,16 +21,34 @@ class Google::CalendarService
     @hook&.settings&.dig('refresh_token').present? && @hook.settings['scope'].to_s.include?('/auth/calendar')
   end
 
-  def list_events(time_min:, time_max:)
+  # Lista as agendas (calendars) que a conta enxerga — pra mostrar a barra
+  # lateral com todas as agendas (não só a "primary"), com cor e nome de cada.
+  def list_calendars
     token = access_token
     return Result.new(success: false, error: not_connected_message) unless token
 
-    get('/calendars/primary/events', token, {
+    get('/users/me/calendarList', token, { minAccessRole: 'writer' })
+  end
+
+  # Cria uma agenda nova (POST /calendars já cria E inclui na calendarList do
+  # usuário — não precisa de uma segunda chamada pra "assinar" ela).
+  def create_calendar(summary:)
+    token = access_token
+    return Result.new(success: false, error: not_connected_message) unless token
+
+    post('/calendars', token, { summary: summary })
+  end
+
+  def list_events(time_min:, time_max:, calendar_id: 'primary')
+    token = access_token
+    return Result.new(success: false, error: not_connected_message) unless token
+
+    get("/calendars/#{CGI.escape(calendar_id)}/events", token, {
           timeMin: time_min, timeMax: time_max, singleEvents: true, orderBy: 'startTime', maxResults: 250
         })
   end
 
-  def create_event(summary:, start_time:, end_time:, description: nil, all_day: false)
+  def create_event(summary:, start_time:, end_time:, description: nil, all_day: false, calendar_id: 'primary')
     token = access_token
     return Result.new(success: false, error: not_connected_message) unless token
 
@@ -40,7 +59,7 @@ class Google::CalendarService
       end: all_day ? { date: end_time } : { dateTime: end_time, timeZone: 'America/Sao_Paulo' }
     }.compact
 
-    post('/calendars/primary/events', token, body)
+    post("/calendars/#{CGI.escape(calendar_id)}/events", token, body)
   end
 
   private

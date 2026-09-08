@@ -9,15 +9,23 @@ class Api::V1::Reports::GoogleCalendarController < Api::V1::BaseController
     case params[:acao]
     when 'status'
       render json: { success: true, data: { connected: service.connected? } }
+    when 'listar_calendarios'
+      respond(service.list_calendars)
+    when 'criar_calendario'
+      respond(service.create_calendar(summary: params.require(:summary)))
     when 'listar_eventos'
-      respond(service.list_events(time_min: params.require(:time_min), time_max: params.require(:time_max)))
+      respond(service.list_events(
+                time_min: params.require(:time_min), time_max: params.require(:time_max),
+                calendar_id: params[:calendar_id].presence || 'primary'
+              ))
     when 'criar_evento'
       respond(service.create_event(
                 summary: params.require(:summary),
                 description: params[:description],
                 start_time: params.require(:start_time),
                 end_time: params.require(:end_time),
-                all_day: ActiveModel::Type::Boolean.new.cast(params[:all_day])
+                all_day: ActiveModel::Type::Boolean.new.cast(params[:all_day]),
+                calendar_id: params[:calendar_id].presence || 'primary'
               ))
     when 'listar_posts_agendados'
       render json: { success: true, data: scheduled_posts }
