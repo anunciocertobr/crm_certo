@@ -53,6 +53,12 @@ class WorkOrder < ApplicationRecord
   DELIVERY_COURIERS = %w[motoboy_proprio ifood 99 keeta].freeze
 
   belongs_to :motoboy, optional: true
+  has_one :financial_transaction, dependent: :destroy
+
+  # Populado pelo Orders::FulfillmentFinanceService logo após a criação —
+  # avisos de estoque insuficiente (não bloqueiam a ordem), pro controller
+  # devolver na resposta da criação.
+  attr_accessor :stock_warnings
 
   validates :os_number, presence: true, uniqueness: true
   validates :status, presence: true, inclusion: { in: STATUSES }
@@ -74,6 +80,8 @@ class WorkOrder < ApplicationRecord
   scope :order_by_recent, -> { order(created_at: :desc) }
 
   after_create :sync_to_pipeline
+  after_create :process_fulfillment
+  after_update :sync_financial_transaction_amount, if: :saved_change_to_total?
 
   def items_count
     items.to_a.sum { |item| item['quantity'].to_i }
@@ -96,5 +104,21 @@ class WorkOrder < ApplicationRecord
   # card no pipeline/etapa escolhidos em Configurações > Ordens.
   def sync_to_pipeline
     Orders::PipelineSyncService.call(self)
+  end
+
+  # Ver Orders::FulfillmentFinanceService — abate estoque dos produtos
+  # vendidos e lança a venda no financeiro da empresa. Só roda na criação:
+  # editar uma ordem depois não deduz estoque de novo.
+  def process_fulfillment
+    result = Orders::FulfillmentFinanceService.call(self)
+    self.stock_warnings = result.stock_warnings
+  end
+
+  # Mantém a receita lançada em dia com o total da ordem se ela for editada
+  # depois (ex.: corrigir um valor) — não deduz/devolve estoque de novo.
+  def sync_financial_transaction_amount
+    return unless financial_transaction
+
+    financial_transaction.update!(amount: total) if total.to_f > 0
   end
 end

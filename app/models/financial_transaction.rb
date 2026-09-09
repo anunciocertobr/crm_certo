@@ -31,6 +31,7 @@ class FinancialTransaction < ApplicationRecord
   STATUSES = %w[pending confirmed].freeze
 
   belongs_to :recurring_transaction, optional: true
+  belongs_to :work_order, optional: true
 
   validates :kind, presence: true, inclusion: { in: KINDS }
   validates :scope, presence: true, inclusion: { in: SCOPES }

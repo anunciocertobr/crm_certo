@@ -34,6 +34,8 @@ module WorkOrderSerializer
       delivery_courier: work_order.delivery_courier,
       motoboy_id: work_order.motoboy_id,
       motoboy_name: work_order.motoboy&.name,
+      financial_transaction_id: work_order.financial_transaction&.id,
+      stock_warnings: work_order.stock_warnings,
       items: work_order.items || [],
       items_count: work_order.items_count,
       item_names: work_order.item_names,
