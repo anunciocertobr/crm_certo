@@ -68,6 +68,7 @@ module Api
           :client_neighborhood, :client_city, :client_state,
           :device, :problems, :checklist, :observation, :device_password,
           :entry_date, :pickup_date, :device_turns_on, :picked_up,
+          :fulfillment_type, :delivery_courier, :motoboy_id,
           :base_value, :discount, :total, :payment_method, :installments,
           items: [:product_id, :name, :sku, :tipo, :valor, :quantity]
         )

@@ -47,10 +47,18 @@
 class WorkOrder < ApplicationRecord
   STATUSES = %w[open in_progress waiting_parts done delivered cancelled].freeze
   PAYMENT_METHODS = ['Não Definido', 'Dinheiro', 'Cartão de Crédito', 'Cartão de Débito', 'PIX', 'Transferência'].freeze
+  FULFILLMENT_TYPES = %w[pickup delivery].freeze
+  # 'keeta' não tem integração nenhuma no CRM ainda — fica disponível pra
+  # marcar/organizar, mas nenhuma chamada de API existe pra essa opção.
+  DELIVERY_COURIERS = %w[motoboy_proprio ifood 99 keeta].freeze
+
+  belongs_to :motoboy, optional: true
 
   validates :os_number, presence: true, uniqueness: true
   validates :status, presence: true, inclusion: { in: STATUSES }
   validates :payment_method, presence: true, inclusion: { in: PAYMENT_METHODS }
+  validates :fulfillment_type, presence: true, inclusion: { in: FULFILLMENT_TYPES }
+  validates :delivery_courier, inclusion: { in: DELIVERY_COURIERS }, allow_blank: true
   validates :base_value, numericality: { greater_than_or_equal_to: 0 }
   validates :discount, numericality: { greater_than_or_equal_to: 0 }
   validates :total, numericality: { greater_than_or_equal_to: 0 }
