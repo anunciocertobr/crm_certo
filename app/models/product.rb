@@ -192,6 +192,37 @@ class Product < ApplicationRecord
     affected
   end
 
+  # Reverso de sell! — usado quando uma venda é desfeita (ex.: Ordem
+  # cancelada) e o operador escolhe devolver os itens ao estoque. Mesma
+  # lógica de sell!, só que somando em vez de subtraindo; não valida limite
+  # superior (não existe "estoque insuficiente" pra devolver).
+  def restock!(quantity: 1)
+    quantity = quantity.to_i
+    raise ArgumentError, 'quantity must be positive' if quantity <= 0
+
+    affected = []
+    ActiveRecord::Base.transaction do
+      if stock_quantity.present?
+        lock!
+        update!(stock_quantity: stock_quantity + quantity)
+        affected << { id: id, name: name, stock_quantity: stock_quantity }
+      end
+
+      product_ingredients.includes(:ingredient_product).each do |line|
+        next if line.quantity.nil? || line.quantity <= 0
+
+        ingredient = line.ingredient_product
+        next unless ingredient.stock_quantity.present?
+
+        returned = (line.quantity * quantity).round
+        ingredient.lock!
+        ingredient.update!(stock_quantity: ingredient.stock_quantity + returned)
+        affected << { id: ingredient.id, name: ingredient.name, stock_quantity: ingredient.stock_quantity }
+      end
+    end
+    affected
+  end
+
   # Media items (imagens/vídeos): lista extras persistida em `media` (jsonb)
   # incluindo itens legados anexados via Active Storage (has_many_attached).
   def serialized_media

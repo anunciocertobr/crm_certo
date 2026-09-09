@@ -65,7 +65,11 @@ Rails.application.routes.draw do
       get 'marketing/gtm/accounts/:account_id/permissions', to: 'marketing/gtm#permissions'
       post 'marketing/gtm/accounts/:account_id/permissions', to: 'marketing/gtm#create_permission'
       delete 'marketing/gtm/accounts/:account_id/permissions/:permission_id', to: 'marketing/gtm#destroy_permission'
-      resources :work_orders
+      resources :work_orders do
+        member do
+          patch :cancel
+        end
+      end
       scope :ifood, as: :ifood do
         get '/status', to: 'ifood#status'
         get '/orders', to: 'ifood#index'

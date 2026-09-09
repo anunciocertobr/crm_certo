@@ -1,7 +1,7 @@
 module Api
   module V1
     class WorkOrdersController < Api::V1::BaseController
-      before_action :fetch_work_order, only: [:show, :update, :destroy]
+      before_action :fetch_work_order, only: [:show, :update, :destroy, :cancel]
 
       def index
         @work_orders = filtered_work_orders
@@ -36,7 +36,27 @@ module Api
         render json: { success: true, message: 'Work order deleted successfully' }
       end
 
+      # PATCH /work_orders/:id/cancel — o operador escolhe na hora se quer
+      # devolver os itens ao estoque e/ou estornar a venda do financeiro.
+      def cancel
+        result = Orders::CancellationService.call(
+          @work_order,
+          restore_stock: to_bool(params[:restore_stock]),
+          reverse_financial: to_bool(params[:reverse_financial])
+        )
+
+        if result.success
+          render json: { success: true, data: WorkOrderSerializer.serialize(@work_order.reload) }
+        else
+          render json: { success: false, errors: [result.error] }, status: :unprocessable_entity
+        end
+      end
+
       private
+
+      def to_bool(value)
+        ActiveModel::Type::Boolean.new.cast(value)
+      end
 
       def fetch_work_order
         @work_order = WorkOrder.find(params[:id])
