@@ -27,6 +27,29 @@ class Meta::InfrastructureService
     @token.present?
   end
 
+  # Lista as contas de anúncio já existentes na BM — usado pelo dropdown que
+  # preenche ad_account_id nos passos 3+ sem depender de ter rodado o Passo 1
+  # nesta mesma sessão de navegador (setup deixou de exigir ordem sequencial).
+  def list_ad_accounts(business_id:)
+    owned = get("/#{business_id}/owned_ad_accounts", fields: 'id,name,account_id')
+    return owned unless owned.success
+
+    client = get("/#{business_id}/client_ad_accounts", fields: 'id,name,account_id')
+    return client unless client.success
+
+    accounts = ((owned.data['data'] || []) + (client.data['data'] || [])).uniq { |a| a['id'] }
+    Result.new(success: true, data: [{ 'lista_contas_anuncio' => accounts }])
+  end
+
+  # Lista os Datasets (Pixels/CAPI) já existentes na BM — usado pelo dropdown
+  # dos passos "Configurar Dataset" e "Vincular Dataset↔Conta", mesmo motivo.
+  def list_datasets(business_id:)
+    result = get("/#{business_id}/datasets", fields: 'id,name')
+    return result unless result.success
+
+    Result.new(success: true, data: [{ 'lista_datasets' => result.data['data'] || [] }])
+  end
+
   # Passo 1: criar conta de anúncios dentro da BM.
   # Exige "Extended Ad Account Management" (permissão avançada da Meta) —
   # a maioria das contas recebe erro de permissão aqui, o que é esperado.
