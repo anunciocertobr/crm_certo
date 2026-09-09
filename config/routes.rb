@@ -928,6 +928,7 @@ Rails.application.routes.draw do
         get 'menu', to: 'menu#show'
         post 'menu/orders', to: 'menu_orders#create'
         get 'menu/orders/:token/status', to: 'menu_orders#status'
+        post 'menu/google_login', to: 'menu_google_auth#login'
 
         resources :csat_survey, only: [:show, :update]
       end
