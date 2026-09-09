@@ -3,6 +3,7 @@ require 'cgi'
 class Integrations::App
   include Linear::IntegrationHelper
   include Hubspot::IntegrationHelper
+  include Dropbox::IntegrationHelper
   include GoogleConcern
   attr_accessor :params
 
@@ -45,6 +46,8 @@ class Integrations::App
       generate_google_token('google_workspace')
     when 'google_ads'
       generate_google_token('google_ads')
+    when 'dropbox'
+      generate_dropbox_token('dropbox')
     else
       nil
     end
@@ -63,6 +66,8 @@ class Integrations::App
       build_google_workspace_action
     when 'google_ads'
       build_google_ads_action
+    when 'dropbox'
+      build_dropbox_action
     else
       params[:action]
     end
@@ -137,7 +142,12 @@ class Integrations::App
     scope = [
       'email',
       'profile',
-      'https://www.googleapis.com/auth/drive.readonly',
+      # `drive` (leitura E escrita) substitui o antigo `drive.readonly` — a
+      # aba "Drive" do menu principal (Google::DriveService) precisa listar
+      # pastas/arquivos e também permitir subir arquivos do CRM pro Drive
+      # conectado, não só visualizar. Reconexão (prompt=consent) necessária
+      # pra quem só tinha autorizado o escopo de leitura antes.
+      'https://www.googleapis.com/auth/drive',
       'https://www.googleapis.com/auth/tagmanager.edit.containers',
       'https://www.googleapis.com/auth/tagmanager.edit.containerversions',
       'https://www.googleapis.com/auth/tagmanager.delete.containers',
@@ -221,6 +231,23 @@ class Integrations::App
     ].join('&')
   end
 
+  # Dropbox exige seu PRÓPRIO app OAuth (App Key/Secret cadastrados pela
+  # empresa em dropbox.com/developers, ver DROPBOX_APP_KEY/SECRET em
+  # GlobalConfig) — diferente do Google, não dá pra reaproveitar outra
+  # conexão já existente no sistema.
+  def build_dropbox_action
+    client_id = GlobalConfigService.load('DROPBOX_APP_KEY', nil)
+    return nil unless client_id.present?
+
+    [
+      "#{params[:action]}?response_type=code",
+      "client_id=#{client_id}",
+      "redirect_uri=#{CGI.escape(self.class.dropbox_integration_url)}",
+      'token_access_type=offline',
+      "state=#{encode_state}"
+    ].join('&')
+  end
+
   def enabled?(_account = nil)
     case params[:id]
     when 'webhook'
@@ -252,6 +279,10 @@ class Integrations::App
 
   def self.google_workspace_integration_url
     "#{ENV.fetch('FRONTEND_URL', nil)}/settings/integrations/google-workspace/callback"
+  end
+
+  def self.dropbox_integration_url
+    "#{ENV.fetch('FRONTEND_URL', nil)}/settings/integrations/dropbox/callback"
   end
 
   class << self

@@ -108,6 +108,14 @@ google_workspace:
   hook_type: account
   allow_multiple_hooks: false
 
+dropbox:
+  id: dropbox
+  logo: dropbox.png
+  i18n_key: dropbox
+  action: https://www.dropbox.com/oauth2/authorize
+  hook_type: account
+  allow_multiple_hooks: false
+
 linear:
   id: linear
   logo: linear.png

@@ -160,6 +160,8 @@ Rails.application.routes.draw do
         post 'ga4_infrastructure', to: 'ga4_infrastructure#handle'
         post 'ads_infrastructure', to: 'ads_infrastructure#handle'
         post 'google_calendar', to: 'google_calendar#handle'
+        post 'google_drive', to: 'google_drive#handle'
+        post 'dropbox', to: 'dropbox#handle'
         post 'google_contacts', to: 'google_contacts#handle'
         resources :whatsapp_ad_leads, only: [:index, :update]
       end
@@ -618,6 +620,7 @@ Rails.application.routes.draw do
       # colidiria e nunca chegaria no Rails. Mantém o padrão top-level já usado
       # por google/callback, microsoft/callback etc. acima.
       post 'google_workspace/callback', to: 'integrations/google_workspace_authorizations#callback'
+      post 'dropbox/callback', to: 'integrations/dropbox_authorizations#callback'
       get 'google_ads/accessible_customers', to: 'integrations/google_ads_authorizations#accessible_customers'
       post 'google_ads/select_customer', to: 'integrations/google_ads_authorizations#select_customer'
 
