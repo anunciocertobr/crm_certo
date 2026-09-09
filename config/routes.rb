@@ -70,6 +70,7 @@ Rails.application.routes.draw do
           patch :cancel
         end
       end
+      get 'dashboard_tools/token', to: 'dashboard_tools#token'
       scope :ifood, as: :ifood do
         get '/status', to: 'ifood#status'
         get '/orders', to: 'ifood#index'
