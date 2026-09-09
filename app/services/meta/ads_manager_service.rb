@@ -70,7 +70,13 @@ class Meta::AdsManagerService
       Thread.new do
         insights_by_id[account['id']] = get(
           "/#{account['id']}/insights",
-          fields: 'impressions,reach,spend,clicks,cpc,ctr,actions', level: 'account'
+          # date_preset fixo (não seguia o período escolhido no Painel Tráfego —
+          # esse endpoint nunca recebeu date_start/date_stop do front) — deixar
+          # explícito em vez de confiar no default implícito da Graph API, já
+          # que o painel usa este "spend" pra calcular quantos dias o saldo de
+          # contas pré-pagas (Boleto/PIX) ainda dura (ver computeDaysLeft em
+          # dashboards-src/painel_trafego.html).
+          fields: 'impressions,reach,spend,clicks,cpc,ctr,actions', level: 'account', date_preset: 'last_30d'
         )
       end
     end.each(&:join)
