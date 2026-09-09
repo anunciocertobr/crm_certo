@@ -20,6 +20,8 @@ module RecurringTransactionSerializer
       end_date: recurrence.end_date&.iso8601,
       max_occurrences: recurrence.max_occurrences,
       active: recurrence.active,
+      accounting_mode: recurrence.accounting_mode,
+      pending_count: recurrence.financial_transactions.pending_confirmation.count,
       generated_count: recurrence.financial_transactions.count,
       next_occurrence_date: recurrence.next_occurrence_date&.iso8601,
       created_at: recurrence.created_at&.iso8601,

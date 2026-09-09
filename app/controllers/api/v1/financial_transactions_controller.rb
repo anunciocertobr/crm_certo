@@ -1,7 +1,7 @@
 module Api
   module V1
     class FinancialTransactionsController < Api::V1::BaseController
-      before_action :fetch_transaction, only: [:show, :update, :destroy]
+      before_action :fetch_transaction, only: [:show, :update, :destroy, :confirm]
 
       def index
         @transactions = filtered_transactions
@@ -34,6 +34,11 @@ module Api
         render json: { success: true, message: 'Transaction deleted successfully' }
       end
 
+      def confirm
+        @transaction.confirm!
+        render json: { success: true, data: FinancialTransactionSerializer.serialize(@transaction) }
+      end
+
       private
 
       def fetch_transaction
@@ -44,6 +49,10 @@ module Api
 
       def filtered_transactions
         scope = FinancialTransaction.order(:transaction_date, :created_at).reverse_order
+        # Pending (manual-accounting, not-yet-confirmed) occurrences are excluded from the
+        # default listing — and therefore from every total/report computed from it — unless
+        # explicitly requested via ?status=pending, which the "Pendentes de Confirmação" UI uses.
+        scope = params[:status].present? ? scope.by_status(params[:status]) : scope.confirmed
         scope = scope.by_scope(params[:scope])
         scope = scope.by_kind(params[:kind])
         scope = scope.where('transaction_date >= ?', Date.parse(params[:from])) if params[:from].present?
@@ -54,7 +63,7 @@ module Api
       end
 
       def financial_transaction_params
-        params.require(:financial_transaction).permit(:kind, :scope, :description, :category, :amount, :transaction_date, :receipt_url)
+        params.require(:financial_transaction).permit(:kind, :scope, :description, :category, :amount, :transaction_date, :receipt_url, :status)
       end
     end
   end

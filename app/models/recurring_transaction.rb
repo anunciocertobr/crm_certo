@@ -30,6 +30,7 @@ class RecurringTransaction < ApplicationRecord
   SCOPES = %w[store personal].freeze
   FREQUENCIES = %w[monthly days].freeze
   END_RULES = %w[never until_date count].freeze
+  ACCOUNTING_MODES = %w[automatic manual].freeze
 
   # For `end_rule: never` we only materialize occurrences up to this far in the
   # future; `materialize_all!` is called on list requests so the window slides.
@@ -45,6 +46,7 @@ class RecurringTransaction < ApplicationRecord
   validates :start_date, presence: true
   validates :frequency, presence: true, inclusion: { in: FREQUENCIES }
   validates :end_rule, presence: true, inclusion: { in: END_RULES }
+  validates :accounting_mode, presence: true, inclusion: { in: ACCOUNTING_MODES }
   validates :interval_days,
             numericality: { only_integer: true, greater_than: 0 },
             if: -> { frequency == 'days' }
@@ -62,6 +64,10 @@ class RecurringTransaction < ApplicationRecord
 
   def monthly?
     frequency == 'monthly'
+  end
+
+  def manual?
+    accounting_mode == 'manual'
   end
 
   # Date of the nth occurrence (1-based). Monthly steps clamp to month ends
@@ -130,6 +136,8 @@ class RecurringTransaction < ApplicationRecord
         amount: amount,
         transaction_date: occurrence_datetime(number),
         occurrence_number: number,
+        status: manual? ? 'pending' : 'confirmed',
+        confirmed_at: manual? ? nil : now,
         created_at: now,
         updated_at: now
       )

@@ -40,7 +40,11 @@ Rails.application.routes.draw do
         get ':scope', to: 'menu_configs#show'
         put ':scope', to: 'menu_configs#update'
       end
-      resources :financial_transactions
+      resources :financial_transactions do
+        member do
+          post :confirm
+        end
+      end
       resources :recurring_transactions, only: [:index, :create, :update, :destroy]
       post 'finances/receipt_extractions', to: 'finances/receipt_extractions#create'
       get 'finances/receipt_extractions/providers', to: 'finances/receipt_extractions#providers'

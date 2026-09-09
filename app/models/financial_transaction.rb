@@ -28,6 +28,7 @@
 class FinancialTransaction < ApplicationRecord
   KINDS = %w[expense income].freeze
   SCOPES = %w[store personal].freeze
+  STATUSES = %w[pending confirmed].freeze
 
   belongs_to :recurring_transaction, optional: true
 
@@ -36,8 +37,19 @@ class FinancialTransaction < ApplicationRecord
   validates :description, presence: true, length: { maximum: 255 }
   validates :amount, numericality: { greater_than: 0 }
   validates :transaction_date, presence: true
+  validates :status, presence: true, inclusion: { in: STATUSES }
 
   scope :by_scope, ->(scope) { where(scope: scope) if scope.present? }
   scope :by_kind, ->(kind) { where(kind: kind) if kind.present? }
+  scope :by_status, ->(status) { where(status: status) if status.present? }
+  scope :confirmed, -> { where(status: 'confirmed') }
+  scope :pending_confirmation, -> { where(status: 'pending') }
   scope :ordered_recent, -> { order(transaction_date: :desc, created_at: :desc) }
+
+  # Manual-accounting occurrences (e.g. "vou comprar todo mês, mas só registra se
+  # eu confirmar") sit as pending until the user explicitly confirms the purchase
+  # actually happened; they are excluded from totals/reports until then.
+  def confirm!
+    update!(status: 'confirmed', confirmed_at: Time.current)
+  end
 end

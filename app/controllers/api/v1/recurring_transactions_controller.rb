@@ -50,7 +50,7 @@ module Api
         params.require(:recurring_transaction).permit(
           :kind, :scope, :description, :category, :amount,
           :start_date, :frequency, :interval_days,
-          :end_rule, :end_date, :max_occurrences, :active
+          :end_rule, :end_date, :max_occurrences, :active, :accounting_mode
         )
       end
 
