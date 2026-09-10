@@ -298,6 +298,73 @@ class Meta::AdsManagerService
 
   private
 
+  # `asset_base64` continua funcionando (upload direto de bytes, usado pelo
+  # modal "Criar Campanha" do painel_trafego.html). `asset_url` é o caminho
+  # pra quem só tem um link (ex: Agente de Campanhas por IA, que não tem como
+  # gerar bytes de imagem/vídeo direto na conversa) — baixa o arquivo do link
+  # informado e converte pra base64 aqui.
+  def resolve_asset(campanha)
+    if campanha['asset_base64'].present?
+      raw = campanha['asset_base64'].to_s.sub(/\Adata:[^;]+;base64,/, '')
+      return Result.new(success: true, data: [raw, campanha['asset_mimetype'].to_s])
+    end
+
+    url = campanha['asset_url'].to_s
+    return Result.new(success: false, error: 'Nenhuma imagem/vídeo informado (asset_base64 ou asset_url).') if url.blank?
+
+    fetch_external_asset(normalize_public_url(url))
+  end
+
+  # Links de compartilhamento do Dropbox (`dl=0`) devolvem uma página HTML de
+  # preview, não o arquivo — `dl=1` força o download direto. Outros hosts
+  # passam sem alteração.
+  def normalize_public_url(url)
+    uri = URI.parse(url)
+    return url unless uri.host.to_s.include?('dropbox.com')
+
+    query = uri.query.present? ? URI.decode_www_form(uri.query).to_h : {}
+    query['dl'] = '1'
+    uri.query = URI.encode_www_form(query)
+    uri.to_s
+  rescue URI::InvalidURIError
+    url
+  end
+
+  MAX_ASSET_REDIRECTS = 5
+
+  def fetch_external_asset(url, redirects_left: MAX_ASSET_REDIRECTS)
+    uri = URI.parse(url)
+    return Result.new(success: false, error: "Link inválido: #{url.inspect}") unless uri.is_a?(URI::HTTP)
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == 'https'
+    http.read_timeout = 20
+
+    response = http.request(Net::HTTP::Get.new(uri.request_uri))
+
+    if response.is_a?(Net::HTTPRedirection) && redirects_left.positive?
+      return fetch_external_asset(response['location'], redirects_left: redirects_left - 1)
+    end
+
+    unless response.is_a?(Net::HTTPSuccess)
+      return Result.new(success: false, error: "Não consegui baixar o link informado (HTTP #{response.code}). Verifique se o compartilhamento está público.")
+    end
+
+    content_type = response['content-type'].to_s.split(';').first.to_s
+    unless content_type.start_with?('image/') || content_type.start_with?('video/')
+      return Result.new(
+        success: false,
+        error: "O link informado não é uma imagem/vídeo direto (recebi \"#{content_type.presence || 'desconhecido'}\"). " \
+               'Confirme que o compartilhamento (Dropbox/Drive/etc) está público e aponta pro arquivo, não pra uma página de preview.'
+      )
+    end
+
+    Result.new(success: true, data: [Base64.strict_encode64(response.body), content_type])
+  rescue StandardError => e
+    Rails.logger.error "Meta::AdsManagerService: fetch_external_asset(#{url}) error: #{e.message}"
+    Result.new(success: false, error: "Erro ao baixar o link informado: #{e.message}")
+  end
+
   # O modal "Criar Campanha" monta localização por pin (lat/lng + raio) como
   # `geo_locations.cities[].key = 'custom_location_pin'` — formato que nunca
   # existiu de verdade na Graph API (a chave certa pra pin é
@@ -422,9 +489,10 @@ class Meta::AdsManagerService
   def build_creative(act:, campanha:, lead_form_id: nil)
     return build_carousel_creative(act: act, campanha: campanha) if campanha['carousel_items'].is_a?(Array) && campanha['carousel_items'].any?
 
-    raw = campanha['asset_base64'].to_s
-    base64 = raw.sub(/\Adata:[^;]+;base64,/, '')
-    mimetype = campanha['asset_mimetype'].to_s
+    asset = resolve_asset(campanha)
+    return asset unless asset.success
+
+    base64, mimetype = asset.data
     page_id = @page.page_id
     # Precisa bater com o `destination_type` do adset (ver create_campaign_full)
     # — MESSAGE_PAGE sem isso, ou com um app_destination diferente do adset,
