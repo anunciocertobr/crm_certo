@@ -32,7 +32,7 @@ module MarketingClientGoalSerializer
     {
       id: account['id'],
       name: account['name'],
-      locations: Array(account['locations']),
+      locations: Array(account['locations']).map { |l| { name: l['name'], radius: l['radius'] } },
       age_min: account['age_min'],
       age_max: account['age_max'],
       gender: account['gender'],
