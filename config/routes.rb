@@ -72,6 +72,11 @@ Rails.application.routes.draw do
       end
       namespace :marketing do
         resources :client_goals
+        resources :alerts, only: [:index] do
+          member do
+            patch :mark_read
+          end
+        end
       end
       get 'dashboard_tools/token', to: 'dashboard_tools#token'
       scope :ifood, as: :ifood do

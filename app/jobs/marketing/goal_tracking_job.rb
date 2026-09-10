@@ -7,6 +7,7 @@ module Marketing
     # artificialmente alto/baixo dependendo da hora que o job roda.
     def perform(date: Date.yesterday)
       Marketing::GoalTrackingService.call(date: date)
+      Marketing::DailyAlertService.call(date: date)
     end
   end
 end
