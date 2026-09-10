@@ -70,6 +70,9 @@ Rails.application.routes.draw do
           patch :cancel
         end
       end
+      namespace :marketing do
+        resources :client_goals
+      end
       get 'dashboard_tools/token', to: 'dashboard_tools#token'
       scope :ifood, as: :ifood do
         get '/status', to: 'ifood#status'

@@ -116,3 +116,13 @@ whatsapp_credential_probe_scheduler_job:
   class: 'Channels::Whatsapp::CredentialProbeSchedulerJob'
   queue: low
   description: 'Re-probe token-based whatsapp credentials and refresh the verified stamp'
+
+# executed daily at 0500 UTC (0200 no horário de Brasília) — calcula o
+# gasto/resultado real de ontem por cliente/objetivo (Marketing > Metas de
+# Clientes) contra a margem de custo aceita, pra alimentar o aviso de
+# "N dias fora da meta"
+marketing_goal_tracking_job:
+  cron: '0 5 * * *'
+  class: 'Marketing::GoalTrackingJob'
+  queue: low
+  description: 'Compara gasto/resultado real das contas de anúncio contra as metas de custo por resultado configuradas'

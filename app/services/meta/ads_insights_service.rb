@@ -104,6 +104,25 @@ class Meta::AdsInsightsService
     get("/#{ad_id}", access_token: @token, fields: 'id,name,adset{id,name},campaign{id,name}')
   end
 
+  # Spend/reach/actions de UMA conta em UM dia específico — usado por
+  # Marketing::GoalTrackingService pra comparar gasto/resultado real contra
+  # a meta configurada em MarketingClientGoal. Nível "account" (agregado
+  # entre todas as campanhas da conta), não por campanha — o
+  # acompanhamento de metas é por conta/objetivo, não por campanha
+  # individual (ver MarketingClientGoal).
+  def account_insights_for_date(ad_account_id:, date:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    date_str = date.to_s
+    get(
+      "/act_#{ad_account_id}/insights",
+      access_token: @token,
+      level: 'account',
+      fields: 'spend,reach,actions',
+      time_range: { since: date_str, until: date_str }.to_json
+    )
+  end
+
   private
 
   def get(path, params)
