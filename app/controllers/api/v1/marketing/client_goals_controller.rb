@@ -47,13 +47,17 @@ module Api
         def goal_params
           params.require(:marketing_client_goal).permit(
             :name, :segment, :sales_channel, :meta_budget, :active,
-            ad_accounts: %i[id name],
-            objectives: %i[
-              key objective_type custom_label budget
-              target_result_daily target_result_weekly target_result_monthly
-              cost_margin_daily_min cost_margin_daily_max
-              cost_margin_weekly_min cost_margin_weekly_max
-              cost_margin_monthly_min cost_margin_monthly_max
+            ad_accounts: [
+              :id, :name,
+              {
+                objectives: %i[
+                  key objective_type custom_label budget
+                  target_result_daily target_result_weekly target_result_monthly
+                  cost_margin_daily_min cost_margin_daily_max
+                  cost_margin_weekly_min cost_margin_weekly_max
+                  cost_margin_monthly_min cost_margin_monthly_max
+                ]
+              }
             ],
             changelog: %i[change_date level reference_name description]
           )

@@ -1,8 +1,9 @@
-# Roda diariamente (Marketing::GoalTrackingJob) pra cada MarketingClientGoal
-# ativo: soma gasto/alcance/actions de TODAS as contas de anúncio
-# configuradas pro cliente num dia, calcula o custo por resultado de cada
-# objetivo configurado e grava em MarketingGoalDailyStatus se ficou dentro
-# ou fora da margem aceita daquele dia — a base do "N dias fora da meta".
+# Roda diariamente (Marketing::GoalTrackingJob) pra cada conta de anúncio de
+# cada MarketingClientGoal ativo: busca gasto/alcance/actions daquela conta
+# num dia, calcula o custo por resultado de cada objetivo configurado PRA
+# ELA (contas diferentes do mesmo cliente podem ter metas diferentes) e
+# grava em MarketingGoalDailyStatus se ficou dentro ou fora da margem aceita
+# naquele dia — a base do "N dias fora da meta".
 #
 # Objetivos sem uma `action_type` conhecida na Graph API (seguidores, outro)
 # não têm como ser medidos automaticamente — a linha ainda é criada, mas
@@ -41,29 +42,32 @@ module Marketing
     private
 
     def process_goal(goal)
-      ad_account_ids = Array(goal.ad_accounts).map { |a| a['id'] }.compact.uniq
-      return if ad_account_ids.empty?
-
-      totals = aggregate_insights(ad_account_ids)
-
-      Array(goal.objectives).each do |objective|
-        upsert_daily_status(goal, objective, totals)
-      end
+      Array(goal.ad_accounts).each { |account| process_account(goal, account) }
     end
 
-    def aggregate_insights(ad_account_ids)
+    def process_account(goal, account)
+      account_id = account['id']
+      return if account_id.blank?
+
+      objectives = Array(account['objectives'])
+      return if objectives.empty?
+
+      result = @service.account_insights_for_date(ad_account_id: account_id, date: @date)
+      return unless result.success
+
+      row = Array(result.data).first
+      totals = insights_totals(row)
+
+      objectives.each { |objective| upsert_daily_status(goal, objective, totals) }
+    end
+
+    def insights_totals(row)
       totals = { spend: 0.0, reach: 0, actions: Hash.new(0.0) }
-      ad_account_ids.each do |account_id|
-        result = @service.account_insights_for_date(ad_account_id: account_id, date: @date)
-        next unless result.success
+      return totals unless row
 
-        row = Array(result.data).first
-        next unless row
-
-        totals[:spend] += row['spend'].to_f
-        totals[:reach] += row['reach'].to_i
-        Array(row['actions']).each { |a| totals[:actions][a['action_type']] += a['value'].to_f }
-      end
+      totals[:spend] = row['spend'].to_f
+      totals[:reach] = row['reach'].to_i
+      Array(row['actions']).each { |a| totals[:actions][a['action_type']] += a['value'].to_f }
       totals
     end
 

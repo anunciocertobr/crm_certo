@@ -21,11 +21,18 @@ module MarketingClientGoalSerializer
       sales_channel: goal.sales_channel,
       meta_budget: goal.meta_budget.to_f,
       active: goal.active,
-      ad_accounts: goal.ad_accounts || [],
-      objectives: (goal.objectives || []).map { |o| serialize_objective(goal, o) },
+      ad_accounts: (goal.ad_accounts || []).map { |acc| serialize_ad_account(goal, acc) },
       changelog: (goal.changelog || []).sort_by { |c| c['change_date'].to_s }.reverse,
       created_at: goal.created_at&.iso8601,
       updated_at: goal.updated_at&.iso8601
+    }
+  end
+
+  def serialize_ad_account(goal, account)
+    {
+      id: account['id'],
+      name: account['name'],
+      objectives: Array(account['objectives']).map { |o| serialize_objective(goal, o) }
     }
   end
 
