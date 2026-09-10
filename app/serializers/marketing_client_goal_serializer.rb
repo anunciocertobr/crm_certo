@@ -32,6 +32,10 @@ module MarketingClientGoalSerializer
     {
       id: account['id'],
       name: account['name'],
+      locations: Array(account['locations']),
+      age_min: account['age_min'],
+      age_max: account['age_max'],
+      gender: account['gender'],
       objectives: Array(account['objectives']).map { |o| serialize_objective(goal, o) }
     }
   end

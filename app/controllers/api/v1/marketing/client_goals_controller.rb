@@ -49,8 +49,9 @@ module Api
             :name, :sales_channel, :meta_budget, :active,
             segments: [],
             ad_accounts: [
-              :id, :name,
+              :id, :name, :age_min, :age_max, :gender,
               {
+                locations: [],
                 objectives: %i[
                   key objective_type custom_label budget
                   target_result_daily target_result_weekly target_result_monthly
