@@ -23,8 +23,15 @@ class Meta::AdsInsightsService
     'posicionamento' => 'impression_device,device_platform,platform_position,publisher_platform'
   }.freeze
 
+  # `objective` (objetivo da campanha: OUTCOME_TRAFFIC, OUTCOME_LEADS, etc.)
+  # faltava aqui — a Graph API de Insights aceita esse campo (é repassado do
+  # objeto Campaign, igual campaign_name/adset_name/ad_name), mas como nunca
+  # era pedido, toda linha vinha com objective=nil. Isso fazia o filtro
+  # "Objetivo" do relatório (relatorios_leads_meta_google.html) nunca ter
+  # opções pra escolher além de "Todos os Objetivos", e o gráfico
+  # "Investimento por Objetivo" jogar tudo em "Não especificado".
   FIELDS = %w[
-    campaign_name campaign_id adset_name adset_id ad_name ad_id
+    campaign_name campaign_id adset_name adset_id ad_name ad_id objective
     spend impressions reach clicks ctr cpc cpm actions cost_per_action_type
   ].freeze
 
