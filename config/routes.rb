@@ -127,7 +127,6 @@ Rails.application.routes.draw do
         put 'work_order_pipeline_config', to: 'work_order_pipeline_configs#update'
         resources :motoboys, only: [:index, :create, :update, :destroy]
         resources :motoboy_deliveries, only: [:index, :create, :update, :destroy]
-        resources :traffic_clients, only: [:index, :create, :update, :destroy]
       end
 
       # Server-side proxy for the Marketing AI tools — keeps ElevenLabs/Groq/
