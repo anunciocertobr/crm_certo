@@ -239,11 +239,17 @@ class Integrations::App
     client_id = GlobalConfigService.load('DROPBOX_APP_KEY', nil)
     return nil unless client_id.present?
 
+    # Escopo explícito na URL (em vez de depender só do que está marcado na
+    # aba Permissions do app no Dropbox Console) — mesmos 3 escopos pedidos
+    # na tela de configuração desta integração.
+    scope = 'files.metadata.write files.metadata.read files.content.write files.content.read'
+
     [
       "#{params[:action]}?response_type=code",
       "client_id=#{client_id}",
       "redirect_uri=#{CGI.escape(self.class.dropbox_integration_url)}",
       'token_access_type=offline',
+      "scope=#{CGI.escape(scope)}",
       "state=#{encode_state}"
     ].join('&')
   end
