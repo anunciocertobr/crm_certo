@@ -17,7 +17,7 @@ module MarketingClientGoalSerializer
     {
       id: goal.id,
       name: goal.name,
-      segment: goal.segment,
+      segments: goal.segments || [],
       sales_channel: goal.sales_channel,
       meta_budget: goal.meta_budget.to_f,
       active: goal.active,

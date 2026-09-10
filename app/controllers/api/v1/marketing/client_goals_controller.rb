@@ -46,7 +46,8 @@ module Api
 
         def goal_params
           params.require(:marketing_client_goal).permit(
-            :name, :segment, :sales_channel, :meta_budget, :active,
+            :name, :sales_channel, :meta_budget, :active,
+            segments: [],
             ad_accounts: [
               :id, :name,
               {

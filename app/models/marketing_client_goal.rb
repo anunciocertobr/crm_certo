@@ -29,6 +29,7 @@ class MarketingClientGoal < ApplicationRecord
   def normalize_blank_jsonb_arrays
     self.ad_accounts ||= []
     self.changelog ||= []
+    self.segments ||= []
   end
 
   def assign_objective_keys
