@@ -17,7 +17,11 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
     when 'lista_bms'
       respond(service.business_managers)
     when 'conta_de_anuncio', 'lista_de_contas'
-      respond(service.ad_accounts(business_id: params[:id_bm]))
+      respond(service.ad_accounts(
+        business_id: params[:id_bm],
+        date_start: params[:date_start],
+        date_stop: params[:date_stop]
+      ))
     when 'campanhas', 'adsets', 'ads'
       respond(service.campaigns_tree(
         ad_account_id: params.require(:id_conta_anuncio),

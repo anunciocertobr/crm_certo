@@ -42,7 +42,14 @@ class Meta::AdsManagerService
   # business_id: quando presente, escopa às contas dessa Business Manager
   # (donas + clientes) em vez do /me/adaccounts global — usado pelo nível
   # "BM" do Painel Tráfego (BM > Contas > Campanhas > ...).
-  def ad_accounts(business_id: nil)
+  # date_start/date_stop: período escolhido no Painel Tráfego (Hoje/Semana/
+  # Mês/Últimos 30 dias/Ano/Máximo/Customizado). Antes este método ignorava
+  # esses parâmetros por completo e sempre buscava date_preset=last_30d —
+  # por isso o Gasto/Impressões/etc. no nível de Contas nunca mudava,
+  # independente do período selecionado na UI (só o drill-down de
+  # campanhas respeitava o período). Se vierem ausentes, cai de volta pra
+  # last_30d (mesmo comportamento de antes).
+  def ad_accounts(business_id: nil, date_start: nil, date_stop: nil)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
 
     fields = 'id,name,account_id,balance,spend_cap,is_prepay_account,amount_spent,currency'
@@ -61,31 +68,53 @@ class Meta::AdsManagerService
       raw_accounts = result.data
     end
 
+    insight_fields = 'impressions,reach,spend,clicks,cpc,ctr,actions'
+    period_params = if date_start.present? && date_stop.present?
+                      { time_range: { since: date_start, until: date_stop }.to_json }
+                    else
+                      { date_preset: 'last_30d' }
+                    end
+
     # Uma request HTTP por conta, em série, estourava o timeout de 15s do
     # Rack::Timeout assim que o token tinha mais de ~10 contas (visto em
     # produção com 25 contas -> 500). Em paralelo, o tempo total passa a ser
     # o da conta mais lenta, não a soma de todas.
+    #
+    # Duas buscas por conta (não uma): "insights" segue o período escolhido
+    # na UI (pro Gasto/Impressões/etc. dos cards), e "insights_30d" fica
+    # SEMPRE fixo em last_30d, só pra alimentar o cálculo de dias restantes
+    # de orçamento (computeDaysLeft no front) — esse cálculo precisa de uma
+    # janela conhecida e estável (30 dias) no denominador, senão trocar o
+    # período pra "Hoje" faria a conta achar que o saldo dura só 1 dia de
+    # gasto. Lançar as duas junto (não uma leva depois da outra) evita
+    # dobrar a latência total.
     insights_by_id = Concurrent::Hash.new
-    raw_accounts.map do |account|
-      Thread.new do
-        insights_by_id[account['id']] = get(
-          "/#{account['id']}/insights",
-          # date_preset fixo (não seguia o período escolhido no Painel Tráfego —
-          # esse endpoint nunca recebeu date_start/date_stop do front) — deixar
-          # explícito em vez de confiar no default implícito da Graph API, já
-          # que o painel usa este "spend" pra calcular quantos dias o saldo de
-          # contas pré-pagas (Boleto/PIX) ainda dura (ver computeDaysLeft em
-          # dashboards-src/painel_trafego.html).
-          fields: 'impressions,reach,spend,clicks,cpc,ctr,actions', level: 'account', date_preset: 'last_30d'
-        )
-      end
-    end.each(&:join)
+    days_left_insights_by_id = Concurrent::Hash.new
+    threads = raw_accounts.flat_map do |account|
+      [
+        Thread.new do
+          insights_by_id[account['id']] = get(
+            "/#{account['id']}/insights",
+            { fields: insight_fields, level: 'account' }.merge(period_params)
+          )
+        end,
+        Thread.new do
+          days_left_insights_by_id[account['id']] = get(
+            "/#{account['id']}/insights",
+            fields: 'spend', level: 'account', date_preset: 'last_30d'
+          )
+        end
+      ]
+    end
+    threads.each(&:join)
 
     accounts = raw_accounts.map do |account|
       insights = insights_by_id[account['id']]
+      days_left_insights = days_left_insights_by_id[account['id']]
       account.merge(
         'id' => account['account_id'] || account['id'].to_s.delete_prefix('act_'),
-        'insights' => insights&.success ? insights.data : []
+        'insights' => insights&.success ? insights.data : [],
+        'insights_30d' => days_left_insights&.success ? days_left_insights.data : []
       )
     end
 
