@@ -257,6 +257,10 @@ en:
       name: 'Google Login'
       short_description: 'Connect your Google account to read Drive files and Tag Manager data.'
       description: 'Sign in with Google to allow read-only access to Google Drive and Google Tag Manager, used by other tools in the CRM.'
+    dropbox:
+      name: 'Dropbox'
+      short_description: 'Connect a Dropbox account to browse and manage files from the CRM.'
+      description: 'Connect a Dropbox account to browse, upload and manage files directly from the Drive/Dropbox tab in the CRM.'
     linear:
       name: 'Linear'
       short_description: 'Create and link Linear issues directly from conversations.'

@@ -23,8 +23,15 @@ class Meta::AdsInsightsService
     'posicionamento' => 'impression_device,device_platform,platform_position,publisher_platform'
   }.freeze
 
+  # `objective` (objetivo da campanha: OUTCOME_TRAFFIC, OUTCOME_LEADS, etc.)
+  # faltava aqui — a Graph API de Insights aceita esse campo (é repassado do
+  # objeto Campaign, igual campaign_name/adset_name/ad_name), mas como nunca
+  # era pedido, toda linha vinha com objective=nil. Isso fazia o filtro
+  # "Objetivo" do relatório (relatorios_leads_meta_google.html) nunca ter
+  # opções pra escolher além de "Todos os Objetivos", e o gráfico
+  # "Investimento por Objetivo" jogar tudo em "Não especificado".
   FIELDS = %w[
-    campaign_name campaign_id adset_name adset_id ad_name ad_id
+    campaign_name campaign_id adset_name adset_id ad_name ad_id objective
     spend impressions reach clicks ctr cpc cpm actions cost_per_action_type
   ].freeze
 
@@ -95,6 +102,25 @@ class Meta::AdsInsightsService
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
 
     get("/#{ad_id}", access_token: @token, fields: 'id,name,adset{id,name},campaign{id,name}')
+  end
+
+  # Spend/reach/actions de UMA conta em UM dia específico — usado por
+  # Marketing::GoalTrackingService pra comparar gasto/resultado real contra
+  # a meta configurada em MarketingClientGoal. Nível "account" (agregado
+  # entre todas as campanhas da conta), não por campanha — o
+  # acompanhamento de metas é por conta/objetivo, não por campanha
+  # individual (ver MarketingClientGoal).
+  def account_insights_for_date(ad_account_id:, date:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    date_str = date.to_s
+    get(
+      "/act_#{ad_account_id}/insights",
+      access_token: @token,
+      level: 'account',
+      fields: 'spend,reach,actions',
+      time_range: { since: date_str, until: date_str }.to_json
+    )
   end
 
   private

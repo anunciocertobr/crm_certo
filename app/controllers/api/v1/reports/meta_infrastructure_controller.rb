@@ -8,6 +8,10 @@ class Api::V1::Reports::MetaInfrastructureController < Api::V1::BaseController
     case params[:acao]
     when 'lista_bms'
       respond(Meta::AdsManagerService.new.business_managers)
+    when 'lista_contas_anuncio'
+      respond(service.list_ad_accounts(business_id: params.require(:business_id)))
+    when 'lista_datasets'
+      respond(service.list_datasets(business_id: params.require(:business_id)))
     when 'criar_conta_anuncio'
       respond(service.create_ad_account(
         business_id: params.require(:business_id),

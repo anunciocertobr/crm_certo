@@ -38,7 +38,8 @@ class Public::Api::V1::MenuController < PublicController
       title_color: GlobalConfigService.load('MENU_TITLE_COLOR', nil),
       company_name_color: GlobalConfigService.load('MENU_COMPANY_NAME_COLOR', nil),
       gtm_id: GlobalConfigService.load('MENU_GTM_ID', nil),
-      whatsapp_number: GlobalConfigService.load('MENU_WHATSAPP_NUMBER', nil)
+      whatsapp_number: GlobalConfigService.load('MENU_WHATSAPP_NUMBER', nil),
+      google_client_id: GlobalConfigService.load('GOOGLE_OAUTH_CLIENT_ID', nil)
     }
   end
 end

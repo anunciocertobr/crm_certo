@@ -19,6 +19,8 @@ module FinancialTransactionSerializer
       receipt_url: transaction.receipt_url,
       recurring_transaction_id: transaction.recurring_transaction_id,
       occurrence_number: transaction.occurrence_number,
+      status: transaction.status,
+      confirmed_at: transaction.confirmed_at&.iso8601,
       created_at: transaction.created_at&.iso8601,
       updated_at: transaction.updated_at&.iso8601
     }

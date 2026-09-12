@@ -125,3 +125,23 @@ ifood_poll_events_job:
   class: 'Ifood::PollEventsJob'
   queue: scheduled_jobs
   description: 'Keep the iFood integration connected by polling order events regularly'
+
+# executed daily at 0500 UTC (0200 no horário de Brasília) — calcula o
+# gasto/resultado real de ontem por cliente/objetivo (Marketing > Metas de
+# Clientes) contra a margem de custo aceita, pra alimentar o aviso de
+# "N dias fora da meta"
+marketing_goal_tracking_job:
+  cron: '0 5 * * *'
+  class: 'Marketing::GoalTrackingJob'
+  queue: low
+  description: 'Compara gasto/resultado real das contas de anúncio contra as metas de custo por resultado configuradas, e avisa (Marketing > Alertas e Relatórios) se algo ficou fora da margem'
+
+# executada toda segunda-feira às 0530 UTC (0230 no horário de Brasília) —
+# roda depois do marketing_goal_tracking_job de segunda (que já processou o
+# domingo, último dia da semana anterior) pra garantir que todos os 7 dias
+# já estão calculados antes de somar a semana.
+marketing_weekly_report_job:
+  cron: '30 5 * * 1'
+  class: 'Marketing::WeeklyReportJob'
+  queue: low
+  description: 'Envia o relatório semanal de Marketing (Metas de Clientes) pelos canais configurados'

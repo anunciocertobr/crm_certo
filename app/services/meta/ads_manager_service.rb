@@ -42,7 +42,14 @@ class Meta::AdsManagerService
   # business_id: quando presente, escopa às contas dessa Business Manager
   # (donas + clientes) em vez do /me/adaccounts global — usado pelo nível
   # "BM" do Painel Tráfego (BM > Contas > Campanhas > ...).
-  def ad_accounts(business_id: nil)
+  # date_start/date_stop: período escolhido no Painel Tráfego (Hoje/Semana/
+  # Mês/Últimos 30 dias/Ano/Máximo/Customizado). Antes este método ignorava
+  # esses parâmetros por completo e sempre buscava date_preset=last_30d —
+  # por isso o Gasto/Impressões/etc. no nível de Contas nunca mudava,
+  # independente do período selecionado na UI (só o drill-down de
+  # campanhas respeitava o período). Se vierem ausentes, cai de volta pra
+  # last_30d (mesmo comportamento de antes).
+  def ad_accounts(business_id: nil, date_start: nil, date_stop: nil)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
 
     fields = 'id,name,account_id,balance,spend_cap,is_prepay_account,amount_spent,currency'
@@ -61,25 +68,53 @@ class Meta::AdsManagerService
       raw_accounts = result.data
     end
 
+    insight_fields = 'impressions,reach,spend,clicks,cpc,ctr,actions'
+    period_params = if date_start.present? && date_stop.present?
+                      { time_range: { since: date_start, until: date_stop }.to_json }
+                    else
+                      { date_preset: 'last_30d' }
+                    end
+
     # Uma request HTTP por conta, em série, estourava o timeout de 15s do
     # Rack::Timeout assim que o token tinha mais de ~10 contas (visto em
     # produção com 25 contas -> 500). Em paralelo, o tempo total passa a ser
     # o da conta mais lenta, não a soma de todas.
+    #
+    # Duas buscas por conta (não uma): "insights" segue o período escolhido
+    # na UI (pro Gasto/Impressões/etc. dos cards), e "insights_30d" fica
+    # SEMPRE fixo em last_30d, só pra alimentar o cálculo de dias restantes
+    # de orçamento (computeDaysLeft no front) — esse cálculo precisa de uma
+    # janela conhecida e estável (30 dias) no denominador, senão trocar o
+    # período pra "Hoje" faria a conta achar que o saldo dura só 1 dia de
+    # gasto. Lançar as duas junto (não uma leva depois da outra) evita
+    # dobrar a latência total.
     insights_by_id = Concurrent::Hash.new
-    raw_accounts.map do |account|
-      Thread.new do
-        insights_by_id[account['id']] = get(
-          "/#{account['id']}/insights",
-          fields: 'impressions,reach,spend,clicks,cpc,ctr,actions', level: 'account'
-        )
-      end
-    end.each(&:join)
+    days_left_insights_by_id = Concurrent::Hash.new
+    threads = raw_accounts.flat_map do |account|
+      [
+        Thread.new do
+          insights_by_id[account['id']] = get(
+            "/#{account['id']}/insights",
+            { fields: insight_fields, level: 'account' }.merge(period_params)
+          )
+        end,
+        Thread.new do
+          days_left_insights_by_id[account['id']] = get(
+            "/#{account['id']}/insights",
+            fields: 'spend', level: 'account', date_preset: 'last_30d'
+          )
+        end
+      ]
+    end
+    threads.each(&:join)
 
     accounts = raw_accounts.map do |account|
       insights = insights_by_id[account['id']]
+      days_left_insights = days_left_insights_by_id[account['id']]
       account.merge(
         'id' => account['account_id'] || account['id'].to_s.delete_prefix('act_'),
-        'insights' => insights&.success ? insights.data : []
+        'insights' => insights&.success ? insights.data : [],
+        'insights_30d' => days_left_insights&.success ? days_left_insights.data : []
       )
     end
 
@@ -263,6 +298,73 @@ class Meta::AdsManagerService
 
   private
 
+  # `asset_base64` continua funcionando (upload direto de bytes, usado pelo
+  # modal "Criar Campanha" do painel_trafego.html). `asset_url` é o caminho
+  # pra quem só tem um link (ex: Agente de Campanhas por IA, que não tem como
+  # gerar bytes de imagem/vídeo direto na conversa) — baixa o arquivo do link
+  # informado e converte pra base64 aqui.
+  def resolve_asset(campanha)
+    if campanha['asset_base64'].present?
+      raw = campanha['asset_base64'].to_s.sub(/\Adata:[^;]+;base64,/, '')
+      return Result.new(success: true, data: [raw, campanha['asset_mimetype'].to_s])
+    end
+
+    url = campanha['asset_url'].to_s
+    return Result.new(success: false, error: 'Nenhuma imagem/vídeo informado (asset_base64 ou asset_url).') if url.blank?
+
+    fetch_external_asset(normalize_public_url(url))
+  end
+
+  # Links de compartilhamento do Dropbox (`dl=0`) devolvem uma página HTML de
+  # preview, não o arquivo — `dl=1` força o download direto. Outros hosts
+  # passam sem alteração.
+  def normalize_public_url(url)
+    uri = URI.parse(url)
+    return url unless uri.host.to_s.include?('dropbox.com')
+
+    query = uri.query.present? ? URI.decode_www_form(uri.query).to_h : {}
+    query['dl'] = '1'
+    uri.query = URI.encode_www_form(query)
+    uri.to_s
+  rescue URI::InvalidURIError
+    url
+  end
+
+  MAX_ASSET_REDIRECTS = 5
+
+  def fetch_external_asset(url, redirects_left: MAX_ASSET_REDIRECTS)
+    uri = URI.parse(url)
+    return Result.new(success: false, error: "Link inválido: #{url.inspect}") unless uri.is_a?(URI::HTTP)
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == 'https'
+    http.read_timeout = 20
+
+    response = http.request(Net::HTTP::Get.new(uri.request_uri))
+
+    if response.is_a?(Net::HTTPRedirection) && redirects_left.positive?
+      return fetch_external_asset(response['location'], redirects_left: redirects_left - 1)
+    end
+
+    unless response.is_a?(Net::HTTPSuccess)
+      return Result.new(success: false, error: "Não consegui baixar o link informado (HTTP #{response.code}). Verifique se o compartilhamento está público.")
+    end
+
+    content_type = response['content-type'].to_s.split(';').first.to_s
+    unless content_type.start_with?('image/') || content_type.start_with?('video/')
+      return Result.new(
+        success: false,
+        error: "O link informado não é uma imagem/vídeo direto (recebi \"#{content_type.presence || 'desconhecido'}\"). " \
+               'Confirme que o compartilhamento (Dropbox/Drive/etc) está público e aponta pro arquivo, não pra uma página de preview.'
+      )
+    end
+
+    Result.new(success: true, data: [Base64.strict_encode64(response.body), content_type])
+  rescue StandardError => e
+    Rails.logger.error "Meta::AdsManagerService: fetch_external_asset(#{url}) error: #{e.message}"
+    Result.new(success: false, error: "Erro ao baixar o link informado: #{e.message}")
+  end
+
   # O modal "Criar Campanha" monta localização por pin (lat/lng + raio) como
   # `geo_locations.cities[].key = 'custom_location_pin'` — formato que nunca
   # existiu de verdade na Graph API (a chave certa pra pin é
@@ -387,9 +489,10 @@ class Meta::AdsManagerService
   def build_creative(act:, campanha:, lead_form_id: nil)
     return build_carousel_creative(act: act, campanha: campanha) if campanha['carousel_items'].is_a?(Array) && campanha['carousel_items'].any?
 
-    raw = campanha['asset_base64'].to_s
-    base64 = raw.sub(/\Adata:[^;]+;base64,/, '')
-    mimetype = campanha['asset_mimetype'].to_s
+    asset = resolve_asset(campanha)
+    return asset unless asset.success
+
+    base64, mimetype = asset.data
     page_id = @page.page_id
     # Precisa bater com o `destination_type` do adset (ver create_campaign_full)
     # — MESSAGE_PAGE sem isso, ou com um app_destination diferente do adset,

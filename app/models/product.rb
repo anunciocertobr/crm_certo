@@ -2,48 +2,60 @@
 #
 # Table name: products
 #
-#  id                :uuid             not null, primary key
-#  accessory_type    :string(255)
-#  anatel_number     :string(100)
-#  brand             :string(255)
-#  color             :string(100)
-#  compatible_brands :string(500)
-#  cost_price        :decimal(10, 2)
-#  currency          :string(3)        default("BRL"), not null
-#  default_price     :decimal(10, 2)   default(0.0), not null
-#  description       :text
-#  height_cm         :decimal(10, 2)
-#  item_type         :string(20)       default("produto"), not null
-#  kind              :string(20)       default("physical"), not null
-#  length_cm         :decimal(10, 2)
-#  material          :text
-#  media             :jsonb            not null
-#  metadata          :jsonb            not null
-#  ml_buying_model   :string(100)
-#  ml_category       :string(100)
-#  ml_condition      :string(100)
-#  ml_listing_type   :string(100)
-#  model             :string(255)
-#  name              :string(255)      not null
-#  publish_ml        :boolean          default(FALSE), not null
-#  purchase_url      :string(2048)
-#  size              :string(100)
-#  sku               :string(100)
-#  slug              :string(255)
-#  status            :string(20)       default("active"), not null
-#  stock_quantity    :integer
-#  supplier          :string(255)
-#  weight_kg         :decimal(10, 3)
-#  width_cm          :decimal(10, 2)
-#  created_at        :datetime         not null
-#  updated_at        :datetime         not null
-#  category_id       :uuid
+#  id                            :uuid             not null, primary key
+#  accessory_type                :string(255)
+#  aliquota_imposto_seletivo_pct :decimal(5, 2)
+#  anatel_number                 :string(100)
+#  brand                         :string(255)
+#  cclasstrib                    :string(10)
+#  cest                          :string(10)
+#  cfop_padrao                   :string(10)
+#  color                         :string(100)
+#  compatible_brands             :string(500)
+#  cost_price                    :decimal(10, 2)
+#  csosn                         :string(10)
+#  cst_ibs_cbs                   :string(10)
+#  cst_icms                      :string(10)
+#  cst_pis_cofins                :string(10)
+#  currency                      :string(3)        default("BRL"), not null
+#  default_price                 :decimal(10, 2)   default(0.0), not null
+#  description                   :text
+#  height_cm                     :decimal(10, 2)
+#  item_type                     :string(20)       default("produto"), not null
+#  kind                          :string(20)       default("physical"), not null
+#  length_cm                     :decimal(10, 2)
+#  material                      :text
+#  media                         :jsonb            not null
+#  metadata                      :jsonb            not null
+#  ml_buying_model               :string(100)
+#  ml_category                   :string(100)
+#  ml_condition                  :string(100)
+#  ml_listing_type               :string(100)
+#  model                         :string(255)
+#  name                          :string(255)      not null
+#  ncm                           :string(10)
+#  publish_ml                    :boolean          default(FALSE), not null
+#  purchase_url                  :string(2048)
+#  reducao_ibs_cbs_pct           :decimal(5, 2)
+#  size                          :string(100)
+#  sku                           :string(100)
+#  slug                          :string(255)
+#  status                        :string(20)       default("active"), not null
+#  stock_quantity                :integer
+#  sujeito_imposto_seletivo      :boolean          default(FALSE), not null
+#  supplier                      :string(255)
+#  weight_kg                     :decimal(10, 3)
+#  width_cm                      :decimal(10, 2)
+#  created_at                    :datetime         not null
+#  updated_at                    :datetime         not null
+#  category_id                   :uuid
 #
 # Indexes
 #
 #  index_products_on_item_type  (item_type)
 #  index_products_on_kind       (kind)
 #  index_products_on_metadata   (metadata) USING gin
+#  index_products_on_ncm        (ncm)
 #  index_products_on_sku        (sku) UNIQUE WHERE (sku IS NOT NULL)
 #  index_products_on_status     (status)
 #  index_products_on_supplier   (supplier)
@@ -186,6 +198,37 @@ class Product < ApplicationRecord
 
         ingredient.lock!
         ingredient.update!(stock_quantity: ingredient.stock_quantity - needed)
+        affected << { id: ingredient.id, name: ingredient.name, stock_quantity: ingredient.stock_quantity }
+      end
+    end
+    affected
+  end
+
+  # Reverso de sell! — usado quando uma venda é desfeita (ex.: Ordem
+  # cancelada) e o operador escolhe devolver os itens ao estoque. Mesma
+  # lógica de sell!, só que somando em vez de subtraindo; não valida limite
+  # superior (não existe "estoque insuficiente" pra devolver).
+  def restock!(quantity: 1)
+    quantity = quantity.to_i
+    raise ArgumentError, 'quantity must be positive' if quantity <= 0
+
+    affected = []
+    ActiveRecord::Base.transaction do
+      if stock_quantity.present?
+        lock!
+        update!(stock_quantity: stock_quantity + quantity)
+        affected << { id: id, name: name, stock_quantity: stock_quantity }
+      end
+
+      product_ingredients.includes(:ingredient_product).each do |line|
+        next if line.quantity.nil? || line.quantity <= 0
+
+        ingredient = line.ingredient_product
+        next unless ingredient.stock_quantity.present?
+
+        returned = (line.quantity * quantity).round
+        ingredient.lock!
+        ingredient.update!(stock_quantity: ingredient.stock_quantity + returned)
         affected << { id: ingredient.id, name: ingredient.name, stock_quantity: ingredient.stock_quantity }
       end
     end

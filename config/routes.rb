@@ -40,7 +40,11 @@ Rails.application.routes.draw do
         get ':scope', to: 'menu_configs#show'
         put ':scope', to: 'menu_configs#update'
       end
-      resources :financial_transactions
+      resources :financial_transactions do
+        member do
+          post :confirm
+        end
+      end
       resources :recurring_transactions, only: [:index, :create, :update, :destroy]
       post 'finances/receipt_extractions', to: 'finances/receipt_extractions#create'
       get 'finances/receipt_extractions/providers', to: 'finances/receipt_extractions#providers'
@@ -61,7 +65,20 @@ Rails.application.routes.draw do
       get 'marketing/gtm/accounts/:account_id/permissions', to: 'marketing/gtm#permissions'
       post 'marketing/gtm/accounts/:account_id/permissions', to: 'marketing/gtm#create_permission'
       delete 'marketing/gtm/accounts/:account_id/permissions/:permission_id', to: 'marketing/gtm#destroy_permission'
-      resources :work_orders
+      resources :work_orders do
+        member do
+          patch :cancel
+        end
+      end
+      namespace :marketing do
+        resources :client_goals
+        resources :alerts, only: [:index] do
+          member do
+            patch :mark_read
+          end
+        end
+      end
+      get 'dashboard_tools/token', to: 'dashboard_tools#token'
       scope :ifood, as: :ifood do
         get '/status', to: 'ifood#status'
         get '/orders', to: 'ifood#index'
@@ -152,6 +169,8 @@ Rails.application.routes.draw do
         post 'ga4_infrastructure', to: 'ga4_infrastructure#handle'
         post 'ads_infrastructure', to: 'ads_infrastructure#handle'
         post 'google_calendar', to: 'google_calendar#handle'
+        post 'google_drive', to: 'google_drive#handle'
+        post 'dropbox', to: 'dropbox#handle'
         post 'google_contacts', to: 'google_contacts#handle'
         resources :whatsapp_ad_leads, only: [:index, :update]
       end
@@ -399,6 +418,7 @@ Rails.application.routes.draw do
         end
         resources :variants, controller: 'products/variants', only: [:index, :create, :update, :destroy]
         post :sell, on: :member
+        get :calcular_imposto, on: :member
       end
 
       # Product categories (catalog, autocomplete + create from the product modal).
@@ -619,6 +639,7 @@ Rails.application.routes.draw do
       # colidiria e nunca chegaria no Rails. Mantém o padrão top-level já usado
       # por google/callback, microsoft/callback etc. acima.
       post 'google_workspace/callback', to: 'integrations/google_workspace_authorizations#callback'
+      post 'dropbox/callback', to: 'integrations/dropbox_authorizations#callback'
       get 'google_ads/accessible_customers', to: 'integrations/google_ads_authorizations#accessible_customers'
       post 'google_ads/select_customer', to: 'integrations/google_ads_authorizations#select_customer'
 
@@ -933,6 +954,7 @@ Rails.application.routes.draw do
         get 'menu', to: 'menu#show'
         post 'menu/orders', to: 'menu_orders#create'
         get 'menu/orders/:token/status', to: 'menu_orders#status'
+        post 'menu/google_login', to: 'menu_google_auth#login'
 
         resources :csat_survey, only: [:show, :update]
       end
