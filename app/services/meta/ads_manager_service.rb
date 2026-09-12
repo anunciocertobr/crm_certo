@@ -395,6 +395,13 @@ class Meta::AdsManagerService
       result = result.merge('flexible_spec' => [{ 'interests' => interests.data }]) if interests.data.any?
     end
 
+    # Exigido pela Graph API desde meados de 2024 ("A sinalização de público
+    # Advantage é obrigatória") — sem isso a criação do conjunto de anúncios
+    # falha com Invalid parameter (subcode 1870227). `0` desliga a expansão
+    # automática de público, mantendo exatamente o direcionamento que o
+    # modal "Criar Campanha" (ou esta ferramenta) montou.
+    result = result.merge('targeting_automation' => { 'advantage_audience' => 0 })
+
     Result.new(success: true, data: result)
   end
 
