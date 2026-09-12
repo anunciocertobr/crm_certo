@@ -220,6 +220,71 @@ class Meta::AdsManagerService
     Result.new(success: true, data: [{ 'body' => { 'success' => true, 'copied_campaign_id' => result.data['copied_ad_id'] || result.data['ad_id'] } }])
   end
 
+  # Objetivo padrão de otimização por objetivo de campanha — usado quando
+  # duplicate_with_new_objective não recebe um optimization_goal explícito.
+  DEFAULT_OPTIMIZATION_GOAL_BY_OBJECTIVE = {
+    'OUTCOME_ENGAGEMENT' => 'CONVERSATIONS',
+    'OUTCOME_TRAFFIC' => 'LINK_CLICKS',
+    'OUTCOME_SALES' => 'OFFSITE_CONVERSIONS',
+    'OUTCOME_LEADS' => 'LEAD_GENERATION'
+  }.freeze
+
+  # Duplica uma campanha TROCANDO o objetivo, sem o bug do "Duplicar" nativo
+  # do Gerenciador de Anúncios (que, ao trocar o objetivo de uma cópia,
+  # costuma perder público/criativo — reclamação recorrente de quem usa o
+  # Gerenciador direto). Em vez de usar o endpoint `/copies` da Graph API
+  # (usado por duplicate_ad acima, que carrega esse mesmo problema), lê o
+  # público e o criativo (imagem/vídeo, título, texto) da campanha de
+  # origem e manda tudo de novo por create_campaign_full — o mesmo caminho,
+  # já testado, que cria uma campanha do zero. Sempre nasce PAUSADA (é uma
+  # campanha nova, não uma edição da original) e usa só o primeiro conjunto/
+  # anúncio da origem (mesma granularidade 1:1:1 que create_campaign_full
+  # já assume).
+  def duplicate_with_new_objective(campaign_id:, ad_account_id:, new_objective:, new_optimization_goal: nil, overrides: {})
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    source = get(
+      "/#{campaign_id}",
+      fields: 'name,adsets.limit(1){name,daily_budget,targeting,ads.limit(1){name,creative{body,title,image_url,video_id}}}'
+    )
+    return step_error(source, 'campanha de origem') unless source.success
+
+    adset = source.data.dig('adsets', 'data', 0)
+    return Result.new(success: false, error: 'A campanha de origem não tem conjunto de anúncios pra copiar.') if adset.blank?
+
+    ad = adset.dig('ads', 'data', 0)
+    return Result.new(success: false, error: 'A campanha de origem não tem anúncio pra copiar.') if ad.blank?
+
+    creative = ad['creative'] || {}
+    asset_url = creative['image_url']
+    if asset_url.blank? && creative['video_id'].present?
+      video = get("/#{creative['video_id']}", fields: 'source')
+      asset_url = video.data['source'] if video.success
+    end
+    return Result.new(success: false, error: 'Não encontrei imagem nem vídeo no anúncio de origem pra reaproveitar.') if asset_url.blank?
+
+    optimization_goal = new_optimization_goal.presence || DEFAULT_OPTIMIZATION_GOAL_BY_OBJECTIVE[new_objective]
+
+    campanha = {
+      'name' => overrides['name'].presence || "#{source.data['name']} (#{new_objective})",
+      'status' => 'PAUSED',
+      'objective' => new_objective,
+      'adset_name' => overrides['adset_name'].presence || adset['name'],
+      'adset_status' => 'PAUSED',
+      'daily_budget' => overrides['daily_budget'].presence || adset['daily_budget'],
+      'optimization_goal' => optimization_goal,
+      'bid_strategy' => overrides['bid_strategy'].presence || 'LOWEST_COST_WITHOUT_CAP',
+      'ad_name' => overrides['ad_name'].presence || ad['name'],
+      'ad_status' => 'PAUSED',
+      'title' => overrides['title'].presence || creative['title'],
+      'body' => overrides['body'].presence || creative['body'],
+      'asset_url' => asset_url,
+      'targeting' => adset['targeting'] || {}
+    }.compact
+
+    create_campaign_full(ad_account_id: ad_account_id, campanha: campanha)
+  end
+
   # Cria campanha + conjunto de anúncios + criativo (upload de imagem/vídeo)
   # + anúncio, na mesma conta, num fluxo só — é o que o modal "Criar
   # Campanha" do painel_trafego.html monta e manda em `campanha` (payload

@@ -37,6 +37,15 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
     when 'duplicar'
       edicao = parse_edicao(params[:edicao])
       respond(service.duplicate_ad(id: params.require(:id), edicao: edicao))
+    when 'duplicar_objetivo'
+      overrides = params[:overrides].is_a?(ActionController::Parameters) ? params[:overrides].to_unsafe_h : (params[:overrides] || {})
+      respond(service.duplicate_with_new_objective(
+        campaign_id: params.require(:id),
+        ad_account_id: params.require(:id_conta_anuncio),
+        new_objective: params.require(:novo_objetivo),
+        new_optimization_goal: params[:novo_optimization_goal],
+        overrides: overrides
+      ))
     when 'criar_campanha'
       campanha = params[:campanha].is_a?(ActionController::Parameters) ? params[:campanha].to_unsafe_h : (params[:campanha] || {})
       respond(service.create_campaign_full(ad_account_id: params.require(:id_conta_anuncio), campanha: campanha))
