@@ -581,7 +581,11 @@ class Meta::AdsManagerService
         link: item['link'].presence || default_link,
         image_hash: image_hash,
         name: item['title'],
-        description: item['description']
+        description: item['description'],
+        # "Destino do Messenger ausente em item filho" — quando o CTA do
+        # carrossel é MESSAGE_PAGE, a Graph API exige esse MESMO
+        # call_to_action em CADA cartão, não só no link_data de fora.
+        call_to_action: messaging_flow?(campanha) ? cta : nil
       }.compact
     end
 
