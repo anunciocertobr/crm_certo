@@ -256,11 +256,7 @@ class Meta::AdsManagerService
     return Result.new(success: false, error: 'A campanha de origem não tem anúncio pra copiar.') if ad.blank?
 
     creative = ad['creative'] || {}
-    asset_url = creative['image_url']
-    if asset_url.blank? && creative['video_id'].present?
-      video = get("/#{creative['video_id']}", fields: 'source')
-      asset_url = video.data['source'] if video.success
-    end
+    asset_url = resolve_creative_source_asset(creative)
     return Result.new(success: false, error: 'Não encontrei imagem nem vídeo no anúncio de origem pra reaproveitar.') if asset_url.blank?
 
     optimization_goal = new_optimization_goal.presence || DEFAULT_OPTIMIZATION_GOAL_BY_OBJECTIVE[new_objective]
@@ -318,6 +314,117 @@ class Meta::AdsManagerService
                      })
     return step_error(campaign, 'campanha') unless campaign.success
 
+    result = create_adset_and_ad(act: act, campaign_id: campaign.data['id'], campanha: campanha, lead_form_id: lead_form_id)
+    return result unless result.success
+
+    Result.new(success: true, data: [{ 'body' => result.data.first['body'].merge('campaign_id' => campaign.data['id']) }])
+  end
+
+  # Duplica um CONJUNTO DE ANÚNCIOS (com seu primeiro anúncio) pra dentro de
+  # uma campanha JÁ EXISTENTE — inclusive uma de objetivo diferente. Mesma
+  # lógica de duplicate_with_new_objective (lê público/criativo da origem e
+  # recria do zero via create_adset_and_ad, nunca pelo endpoint `/copies` da
+  # Graph API), só que o destino é uma campanha que já existe, não uma nova.
+  def duplicate_adset_to_campaign(source_adset_id:, target_campaign_id:, ad_account_id:, new_optimization_goal: nil, overrides: {})
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    act = "act_#{ad_account_id}"
+
+    target_campaign = get("/#{target_campaign_id}", fields: 'objective')
+    return step_error(target_campaign, 'campanha de destino') unless target_campaign.success
+
+    source = get(
+      "/#{source_adset_id}",
+      fields: 'name,daily_budget,targeting,ads.limit(1){name,creative{body,title,image_url,video_id}}'
+    )
+    return step_error(source, 'conjunto de origem') unless source.success
+
+    ad = source.data.dig('ads', 'data', 0)
+    return Result.new(success: false, error: 'O conjunto de origem não tem anúncio pra copiar.') if ad.blank?
+
+    creative = ad['creative'] || {}
+    asset_url = resolve_creative_source_asset(creative)
+    return Result.new(success: false, error: 'Não encontrei imagem nem vídeo no anúncio de origem pra reaproveitar.') if asset_url.blank?
+
+    target_objective = target_campaign.data['objective']
+    campanha = {
+      'objective' => target_objective,
+      'optimization_goal' => new_optimization_goal.presence || DEFAULT_OPTIMIZATION_GOAL_BY_OBJECTIVE[target_objective],
+      'adset_name' => overrides['adset_name'].presence || source.data['name'],
+      'adset_status' => 'PAUSED',
+      'daily_budget' => overrides['daily_budget'].presence || source.data['daily_budget'],
+      'bid_strategy' => overrides['bid_strategy'].presence || 'LOWEST_COST_WITHOUT_CAP',
+      'ad_name' => overrides['ad_name'].presence || ad['name'],
+      'ad_status' => 'PAUSED',
+      'title' => overrides['title'].presence || creative['title'],
+      'body' => overrides['body'].presence || creative['body'],
+      'asset_url' => asset_url,
+      'targeting' => source.data['targeting'] || {}
+    }.compact
+
+    lead_form_id = nil
+    if lead_flow?(campanha)
+      lead_form = create_lead_form(campanha: campanha)
+      return step_error(lead_form, 'formulário de cadastro') unless lead_form.success
+
+      lead_form_id = lead_form.data['id']
+    end
+
+    create_adset_and_ad(act: act, campaign_id: target_campaign_id, campanha: campanha, lead_form_id: lead_form_id)
+  end
+
+  # Duplica só o ANÚNCIO (criativo) pra dentro de um CONJUNTO já existente —
+  # mesmo raciocínio, mas sem mexer em campanha/conjunto/público: o
+  # direcionamento já é o do conjunto de destino, só o criativo é novo.
+  def duplicate_ad_to_adset(source_ad_id:, target_adset_id:, ad_account_id:, overrides: {})
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    act = "act_#{ad_account_id}"
+
+    target_adset = get("/#{target_adset_id}", fields: 'campaign_id,optimization_goal')
+    return step_error(target_adset, 'conjunto de destino') unless target_adset.success
+
+    target_campaign = get("/#{target_adset.data['campaign_id']}", fields: 'objective')
+    return step_error(target_campaign, 'campanha de destino') unless target_campaign.success
+
+    source_ad = get("/#{source_ad_id}", fields: 'name,creative{body,title,image_url,video_id}')
+    return step_error(source_ad, 'anúncio de origem') unless source_ad.success
+
+    creative_src = source_ad.data['creative'] || {}
+    asset_url = resolve_creative_source_asset(creative_src)
+    return Result.new(success: false, error: 'Não encontrei imagem nem vídeo no anúncio de origem pra reaproveitar.') if asset_url.blank?
+
+    campanha = {
+      'objective' => target_campaign.data['objective'],
+      'optimization_goal' => target_adset.data['optimization_goal'],
+      'ad_name' => overrides['ad_name'].presence || "#{source_ad.data['name']} - Cópia",
+      'ad_status' => 'PAUSED',
+      'title' => overrides['title'].presence || creative_src['title'],
+      'body' => overrides['body'].presence || creative_src['body'],
+      'asset_url' => asset_url
+    }.compact
+
+    lead_form_id = nil
+    if lead_flow?(campanha)
+      lead_form = create_lead_form(campanha: campanha)
+      return step_error(lead_form, 'formulário de cadastro') unless lead_form.success
+
+      lead_form_id = lead_form.data['id']
+    end
+
+    creative = build_creative(act: act, campanha: campanha, lead_form_id: lead_form_id)
+    return step_error(creative, 'criativo') unless creative.success
+
+    create_ad_only(act: act, adset_id: target_adset_id, creative_id: creative.data['id'], campanha: campanha)
+  end
+
+  private
+
+  # Núcleo compartilhado por create_campaign_full (campanha nova) e
+  # duplicate_adset_to_campaign (campanha já existente): cria o criativo, o
+  # conjunto de anúncios e o anúncio, sempre dentro de um campaign_id que já
+  # existe no momento da chamada.
+  def create_adset_and_ad(act:, campaign_id:, campanha:, lead_form_id: nil)
     creative = build_creative(act: act, campanha: campanha, lead_form_id: lead_form_id)
     return step_error(creative, 'criativo') unless creative.success
 
@@ -330,7 +437,7 @@ class Meta::AdsManagerService
     adset = post("/#{act}/adsets", {
                     name: campanha['adset_name'],
                     status: campanha['adset_status'].presence || 'PAUSED',
-                    campaign_id: campaign.data['id'],
+                    campaign_id: campaign_id,
                     daily_budget: campanha['daily_budget'],
                     optimization_goal: campanha['optimization_goal'],
                     bid_strategy: campanha['bid_strategy'],
@@ -344,24 +451,34 @@ class Meta::AdsManagerService
                   }.compact)
     return step_error(adset, 'conjunto de anúncios') unless adset.success
 
+    ad = create_ad_only(act: act, adset_id: adset.data['id'], creative_id: creative.data['id'], campanha: campanha)
+    return ad unless ad.success
+
+    Result.new(success: true, data: [{ 'body' => ad.data.first['body'].merge('adset_id' => adset.data['id']) }])
+  end
+
+  def create_ad_only(act:, adset_id:, creative_id:, campanha:)
     ad = post("/#{act}/ads", {
                  name: campanha['ad_name'],
                  status: campanha['ad_status'].presence || 'PAUSED',
-                 adset_id: adset.data['id'],
-                 creative: { creative_id: creative.data['id'] }.to_json
+                 adset_id: adset_id,
+                 creative: { creative_id: creative_id }.to_json
                })
     return step_error(ad, 'anúncio') unless ad.success
 
-    Result.new(success: true, data: [{ 'body' => {
-      'success' => true,
-      'campaign_id' => campaign.data['id'],
-      'adset_id' => adset.data['id'],
-      'ad_id' => ad.data['id'],
-      'creative_id' => creative.data['id']
-    } }])
+    Result.new(success: true, data: [{ 'body' => { 'success' => true, 'ad_id' => ad.data['id'], 'creative_id' => creative_id } }])
   end
 
-  private
+  # Extrai a URL pública reaproveitável de um criativo já existente (imagem
+  # direta, ou a URL de origem do vídeo) — usado por toda duplicação que lê
+  # um anúncio de origem pra recriar o criativo em outro lugar.
+  def resolve_creative_source_asset(creative)
+    return creative['image_url'] if creative['image_url'].present?
+    return nil if creative['video_id'].blank?
+
+    video = get("/#{creative['video_id']}", fields: 'source')
+    video.success ? video.data['source'] : nil
+  end
 
   # `asset_base64` continua funcionando (upload direto de bytes, usado pelo
   # modal "Criar Campanha" do painel_trafego.html). `asset_url` é o caminho

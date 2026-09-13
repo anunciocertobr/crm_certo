@@ -46,6 +46,23 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
         new_optimization_goal: params[:novo_optimization_goal],
         overrides: overrides
       ))
+    when 'duplicar_adset_objetivo'
+      overrides = params[:overrides].is_a?(ActionController::Parameters) ? params[:overrides].to_unsafe_h : (params[:overrides] || {})
+      respond(service.duplicate_adset_to_campaign(
+        source_adset_id: params.require(:id),
+        target_campaign_id: params.require(:id_campanha_destino),
+        ad_account_id: params.require(:id_conta_anuncio),
+        new_optimization_goal: params[:novo_optimization_goal],
+        overrides: overrides
+      ))
+    when 'duplicar_anuncio_objetivo'
+      overrides = params[:overrides].is_a?(ActionController::Parameters) ? params[:overrides].to_unsafe_h : (params[:overrides] || {})
+      respond(service.duplicate_ad_to_adset(
+        source_ad_id: params.require(:id),
+        target_adset_id: params.require(:id_conjunto_destino),
+        ad_account_id: params.require(:id_conta_anuncio),
+        overrides: overrides
+      ))
     when 'criar_campanha'
       campanha = params[:campanha].is_a?(ActionController::Parameters) ? params[:campanha].to_unsafe_h : (params[:campanha] || {})
       respond(service.create_campaign_full(ad_account_id: params.require(:id_conta_anuncio), campanha: campanha))
