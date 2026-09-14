@@ -134,6 +134,40 @@ class Meta::AdsManagerService
     Result.new(success: true, data: result.data.merge('id' => result.data['account_id'] || id))
   end
 
+  # Ao escolher uma conta de anúncio em Metas de Clientes, preenche sozinho
+  # idade/gênero/localizações a partir do que a conta JÁ rodou (em vez do
+  # usuário digitar de cabeça o público que normalmente usa) e mostra as
+  # campanhas ativas agora, pra contexto na hora de montar os objetivos.
+  #
+  # "Todo o histórico" na prática é limitado aos 300 conjuntos de anúncio
+  # mais recentes (sem paginar além disso) — como o resto deste service
+  # (ver `campaigns_tree`), uma request só, sem seguir cursor, é o
+  # suficiente pra representar o padrão de público da conta sem arriscar
+  # timeout numa conta com milhares de conjuntos históricos.
+  def account_history_summary(ad_account_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+
+    adsets = get("/act_#{id}/adsets", fields: 'targeting', limit: 300)
+    return adsets unless adsets.success
+
+    campaigns = get(
+      "/act_#{id}/campaigns",
+      fields: 'id,name,objective,daily_budget,lifetime_budget',
+      effective_status: %w[ACTIVE].to_json,
+      limit: 200
+    )
+    return campaigns unless campaigns.success
+
+    Result.new(success: true, data: {
+                 'targeting_summary' => summarize_targeting(adsets.data),
+                 'active_campaigns' => campaigns.data.map { |c|
+                   c.slice('id', 'name', 'objective', 'daily_budget', 'lifetime_budget')
+                 }
+               })
+  end
+
   # Lista as Business Managers que o token tem acesso — nível acima de
   # "Contas" no Painel Tráfego.
   def business_managers
@@ -432,6 +466,49 @@ class Meta::AdsManagerService
   end
 
   private
+
+  # Resume o `targeting` de uma lista de conjuntos de anúncio num único
+  # público "representativo" pra pré-preencher a conta em Metas de
+  # Clientes: idade mínima/máxima como a ENVOLTÓRIA de tudo que já foi
+  # usado (menor idade mínima, maior idade máxima já configuradas —
+  # "de todo o histórico" pede a faixa mais ampla já alcançada, não a mais
+  # comum), gênero como união (só vira "male"/"female" se a conta NUNCA
+  # tiver targetizado o outro gênero; qualquer mistura vira "all"), e
+  # localizações como o conjunto (sem repetição) de cidades/regiões/países
+  # já usados, na ordem em que aparecem.
+  def summarize_targeting(adsets)
+    age_mins = []
+    age_maxes = []
+    genders = Set.new
+    locations = {}
+
+    adsets.each do |adset|
+      targeting = adset['targeting'] || {}
+      age_mins << targeting['age_min'] if targeting['age_min'].present?
+      age_maxes << targeting['age_max'] if targeting['age_max'].present?
+      Array(targeting['genders']).each { |g| genders << g }
+
+      geo = targeting['geo_locations'] || {}
+      Array(geo['cities']).each { |c| locations[c['name']] ||= c['radius'] if c['name'].present? }
+      Array(geo['regions']).each { |r| locations[r['name']] ||= nil if r['name'].present? }
+      Array(geo['countries']).each { |code| locations[code] ||= nil if code.present? }
+    end
+
+    gender = if genders.empty? || (genders.include?(1) && genders.include?(2))
+               'all'
+             elsif genders.include?(1)
+               'male'
+             else
+               'female'
+             end
+
+    {
+      'age_min' => age_mins.min,
+      'age_max' => age_maxes.max,
+      'gender' => gender,
+      'locations' => locations.first(20).map { |name, radius| { 'name' => name, 'radius' => radius } }
+    }
+  end
 
   # Núcleo compartilhado por create_campaign_full (campanha nova) e
   # duplicate_adset_to_campaign (campanha já existente): cria o criativo, o
