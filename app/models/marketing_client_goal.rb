@@ -70,11 +70,11 @@ class MarketingClientGoal < ApplicationRecord
     return unless ad_accounts.is_a?(Array)
 
     ad_accounts.each do |acc|
-      if acc['id'].blank?
-        errors.add(:ad_accounts, 'cada conta de anúncio precisa de id')
-        next
-      end
-
+      # ID da conta Meta é OPCIONAL: um cliente sem conta de anúncio Meta
+      # ligada ainda salva objetivos normalmente, só sem acompanhamento
+      # automático (Marketing::GoalTrackingJob pula contas sem id). Exigir id
+      # aqui fazia o frontend descartar a conta inteira antes de enviar,
+      # silenciosamente, sempre que o cliente não tinha conta Meta cadastrada.
       Array(acc['objectives']).each do |obj|
         type = obj['objective_type']
         unless OBJECTIVE_TYPES.include?(type)
