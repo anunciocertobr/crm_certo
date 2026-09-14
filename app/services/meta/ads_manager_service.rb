@@ -121,6 +121,19 @@ class Meta::AdsManagerService
     Result.new(success: true, data: [{ 'lista_final_contas_de_anuncios' => accounts }])
   end
 
+  # Busca uma única conta pelo ID — usado pelo botão "Buscar conta" de
+  # Metas de Clientes, que preenche o nome da conta a partir só do ID que o
+  # usuário colou (sem precisar navegar Business Manager > Contas).
+  def account_info(ad_account_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    result = get("/act_#{id}", fields: 'name,account_id,currency,timezone_name,amount_spent')
+    return result unless result.success
+
+    Result.new(success: true, data: result.data.merge('id' => result.data['account_id'] || id))
+  end
+
   # Lista as Business Managers que o token tem acesso — nível acima de
   # "Contas" no Painel Tráfego.
   def business_managers

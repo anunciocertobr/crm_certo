@@ -30,6 +30,8 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
       ))
     when 'criativo'
       respond(service.creative_details(ad_id: params.require(:id_anuncio)))
+    when 'conta_info'
+      respond(service.account_info(ad_account_id: params.require(:id_conta_anuncio)))
     when 'editar'
       nivel = params.require(:nivel)
       edicao = filtered_edicao(nivel, parse_edicao(params[:edicao]))
