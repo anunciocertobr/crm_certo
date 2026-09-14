@@ -136,35 +136,46 @@ class Meta::AdsManagerService
 
   # Ao escolher uma conta de anúncio em Metas de Clientes, preenche sozinho
   # idade/gênero/localizações a partir do que a conta JÁ rodou (em vez do
-  # usuário digitar de cabeça o público que normalmente usa) e mostra as
-  # campanhas ativas agora, pra contexto na hora de montar os objetivos.
+  # usuário digitar de cabeça o público que normalmente usa) e traz a
+  # árvore campanha > conjunto > anúncio das campanhas ativas agora, com
+  # métricas dos últimos 30 dias em cada nível — pra dar contexto (e um
+  # jeito de conferir resultado) na hora de montar os objetivos.
   #
-  # "Todo o histórico" na prática é limitado aos 300 conjuntos de anúncio
-  # mais recentes (sem paginar além disso) — como o resto deste service
-  # (ver `campaigns_tree`), uma request só, sem seguir cursor, é o
-  # suficiente pra representar o padrão de público da conta sem arriscar
-  # timeout numa conta com milhares de conjuntos históricos.
+  # "Todo o histórico" (idade/gênero/localizações) na prática é limitado
+  # aos 300 conjuntos de anúncio mais recentes (sem paginar além disso) —
+  # como o resto deste service (ver `campaigns_tree`), uma request só, sem
+  # seguir cursor, é o suficiente pra representar o padrão de público da
+  # conta sem arriscar timeout numa conta com milhares de conjuntos
+  # históricos.
   def account_history_summary(ad_account_id:)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
 
     id = ad_account_id.to_s.delete_prefix('act_')
 
-    adsets = get("/act_#{id}/adsets", fields: 'targeting', limit: 300)
-    return adsets unless adsets.success
+    adsets_for_targeting = get("/act_#{id}/adsets", fields: 'targeting', limit: 300)
+    return adsets_for_targeting unless adsets_for_targeting.success
 
     campaigns = get(
       "/act_#{id}/campaigns",
-      fields: 'id,name,objective,daily_budget,lifetime_budget',
+      fields: 'id,name,objective,daily_budget,lifetime_budget,' \
+              'adsets{id,name,effective_status,daily_budget,lifetime_budget,ads{id,name,effective_status}}',
       effective_status: %w[ACTIVE].to_json,
-      limit: 200
+      limit: 100
     )
     return campaigns unless campaigns.success
 
+    insights = get(
+      "/act_#{id}/insights",
+      fields: 'campaign_id,adset_id,ad_id,spend,impressions,reach,clicks,actions',
+      level: 'ad',
+      date_preset: 'last_30d',
+      limit: 500
+    )
+    insights_by_ad_id = insights.success ? Array(insights.data).index_by { |r| r['ad_id'] } : {}
+
     Result.new(success: true, data: {
-                 'targeting_summary' => summarize_targeting(adsets.data),
-                 'active_campaigns' => campaigns.data.map { |c|
-                   c.slice('id', 'name', 'objective', 'daily_budget', 'lifetime_budget')
-                 }
+                 'targeting_summary' => summarize_targeting(adsets_for_targeting.data),
+                 'active_campaigns' => campaigns.data.map { |c| build_campaign_node(c, insights_by_ad_id) }
                })
   end
 
@@ -508,6 +519,65 @@ class Meta::AdsManagerService
       'gender' => gender,
       'locations' => locations.first(20).map { |name, radius| { 'name' => name, 'radius' => radius } }
     }
+  end
+
+  # Monta a árvore campanha > conjunto > anúncio de #account_history_summary
+  # já com métricas agregadas (soma dos anúncios filhos pra cima) em cada
+  # nível, pra Metas de Clientes não precisar re-somar nada no front.
+  def build_campaign_node(campaign, insights_by_ad_id)
+    adsets = Array(campaign.dig('adsets', 'data')).map { |a| build_adset_node(a, insights_by_ad_id) }
+
+    campaign.slice('id', 'name', 'objective', 'daily_budget', 'lifetime_budget').merge(
+      'active_adsets_count' => adsets.count { |a| a['effective_status'] == 'ACTIVE' },
+      'metrics' => merge_metrics(adsets.map { |a| a['metrics'] }),
+      'adsets' => adsets
+    )
+  end
+
+  def build_adset_node(adset, insights_by_ad_id)
+    ads = Array(adset.dig('ads', 'data')).map { |ad| build_ad_node(ad, insights_by_ad_id) }
+
+    adset.slice('id', 'name', 'effective_status', 'daily_budget', 'lifetime_budget').merge(
+      'active_ads_count' => ads.count { |ad| ad['effective_status'] == 'ACTIVE' },
+      'metrics' => merge_metrics(ads.map { |ad| ad['metrics'] }),
+      'ads' => ads
+    )
+  end
+
+  def build_ad_node(ad, insights_by_ad_id)
+    ad.slice('id', 'name', 'effective_status').merge('metrics' => ad_metrics(insights_by_ad_id[ad['id']]))
+  end
+
+  def ad_metrics(row)
+    return empty_metrics unless row
+
+    actions = Hash.new(0.0)
+    Array(row['actions']).each { |a| actions[a['action_type']] += a['value'].to_f }
+
+    {
+      'spend' => row['spend'].to_f.round(2),
+      'impressions' => row['impressions'].to_i,
+      'reach' => row['reach'].to_i,
+      'clicks' => row['clicks'].to_i,
+      'actions' => actions
+    }
+  end
+
+  def empty_metrics
+    { 'spend' => 0.0, 'impressions' => 0, 'reach' => 0, 'clicks' => 0, 'actions' => {} }
+  end
+
+  def merge_metrics(list)
+    merged = list.reduce(empty_metrics) do |acc, m|
+      {
+        'spend' => acc['spend'] + m['spend'],
+        'impressions' => acc['impressions'] + m['impressions'],
+        'reach' => acc['reach'] + m['reach'],
+        'clicks' => acc['clicks'] + m['clicks'],
+        'actions' => acc['actions'].merge(m['actions']) { |_type, v1, v2| v1 + v2 }
+      }
+    end
+    merged.merge('spend' => merged['spend'].round(2))
   end
 
   # Núcleo compartilhado por create_campaign_full (campanha nova) e
