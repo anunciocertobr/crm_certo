@@ -36,7 +36,62 @@ module MarketingClientGoalSerializer
       age_min: account['age_min'],
       age_max: account['age_max'],
       gender: account['gender'],
-      objectives: Array(account['objectives']).map { |o| serialize_objective(goal, o) }
+      objectives: Array(account['objectives']).map { |o| serialize_objective(goal, o) },
+      campaigns: Array(account['campaigns']).map { |c| serialize_campaign_goal(c) }
+    }
+  end
+
+  # Metas de campanha/conjunto/anúncio: sem acompanhamento automático ainda
+  # (Marketing::GoalTrackingJob só processa o nível conta — ver comentário
+  # em MarketingClientGoal), então sem as queries de status/streak que
+  # serialize_objective faz pro nível conta.
+  def serialize_campaign_goal(campaign)
+    {
+      id: campaign['id'],
+      name: campaign['name'],
+      objectives: Array(campaign['objectives']).map { |o| serialize_plain_objective(o) },
+      adsets: Array(campaign['adsets']).map { |a| serialize_adset_goal(a) }
+    }
+  end
+
+  def serialize_adset_goal(adset)
+    {
+      id: adset['id'],
+      name: adset['name'],
+      objectives: Array(adset['objectives']).map { |o| serialize_plain_objective(o) },
+      ads: Array(adset['ads']).map { |ad| serialize_ad_goal(ad) }
+    }
+  end
+
+  def serialize_ad_goal(ad)
+    {
+      id: ad['id'],
+      name: ad['name'],
+      objectives: Array(ad['objectives']).map { |o| serialize_plain_objective(o) }
+    }
+  end
+
+  def serialize_plain_objective(objective)
+    {
+      key: objective['key'],
+      objective_type: objective['objective_type'],
+      label: objective['objective_type'] == 'outro' ? objective['custom_label'] : OBJECTIVE_LABELS[objective['objective_type']],
+      budget: objective['budget'].to_f,
+      target_result_daily: objective['target_result_daily'],
+      target_result_weekly: objective['target_result_weekly'],
+      target_result_monthly: objective['target_result_monthly'],
+      target_result_daily_min: objective['target_result_daily_min'],
+      target_result_daily_max: objective['target_result_daily_max'],
+      target_result_weekly_min: objective['target_result_weekly_min'],
+      target_result_weekly_max: objective['target_result_weekly_max'],
+      target_result_monthly_min: objective['target_result_monthly_min'],
+      target_result_monthly_max: objective['target_result_monthly_max'],
+      cost_margin_daily_min: objective['cost_margin_daily_min'],
+      cost_margin_daily_max: objective['cost_margin_daily_max'],
+      cost_margin_weekly_min: objective['cost_margin_weekly_min'],
+      cost_margin_weekly_max: objective['cost_margin_weekly_max'],
+      cost_margin_monthly_min: objective['cost_margin_monthly_min'],
+      cost_margin_monthly_max: objective['cost_margin_monthly_max']
     }
   end
 
@@ -53,6 +108,12 @@ module MarketingClientGoalSerializer
       target_result_daily: objective['target_result_daily'],
       target_result_weekly: objective['target_result_weekly'],
       target_result_monthly: objective['target_result_monthly'],
+      target_result_daily_min: objective['target_result_daily_min'],
+      target_result_daily_max: objective['target_result_daily_max'],
+      target_result_weekly_min: objective['target_result_weekly_min'],
+      target_result_weekly_max: objective['target_result_weekly_max'],
+      target_result_monthly_min: objective['target_result_monthly_min'],
+      target_result_monthly_max: objective['target_result_monthly_max'],
       cost_margin_daily_min: objective['cost_margin_daily_min'],
       cost_margin_daily_max: objective['cost_margin_daily_max'],
       cost_margin_weekly_min: objective['cost_margin_weekly_min'],
