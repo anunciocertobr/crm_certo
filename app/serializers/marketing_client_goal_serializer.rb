@@ -9,6 +9,7 @@ module MarketingClientGoalSerializer
     'video' => 'Visualizações de Vídeo',
     'alcance' => 'Alcance',
     'vendas_site' => 'Vendas no Site',
+    'lead_formulario' => 'Lead via Formulário',
     'lead_site' => 'Lead no Site',
     'outro' => 'Outro'
   }.freeze

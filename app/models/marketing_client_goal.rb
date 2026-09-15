@@ -35,7 +35,7 @@ require 'securerandom'
 # e fica salvo em MarketingGoalDailyStatus (uma linha por objetivo por dia,
 # só no nível conta por enquanto).
 class MarketingClientGoal < ApplicationRecord
-  OBJECTIVE_TYPES = %w[mensagens seguidores video alcance vendas_site lead_site outro].freeze
+  OBJECTIVE_TYPES = %w[mensagens seguidores video alcance vendas_site lead_formulario lead_site outro].freeze
   SALES_CHANNELS = ['Site', 'WhatsApp', 'Loja Física', 'Marketplace', 'Instagram/Direct', 'Telefone', 'Outro'].freeze
   CHANGELOG_LEVELS = %w[conta campanha conjunto anuncio].freeze
 

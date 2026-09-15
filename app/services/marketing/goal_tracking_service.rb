@@ -18,7 +18,12 @@ module Marketing
       'mensagens' => %w[onsite_conversion.total_messaging_connection onsite_conversion.messaging_conversation_started_7d],
       'video' => %w[video_view],
       'vendas_site' => %w[offsite_conversion.fb_pixel_purchase purchase omni_purchase],
-      'lead_site' => %w[offsite_conversion.fb_pixel_lead lead onsite_conversion.lead_grouped],
+      # Lead de FORMULÁRIO nativo do Meta (instant form) e lead de SITE
+      # (pixel/Conversions API) são fontes diferentes — antes ficavam
+      # somados num "lead_site" só, o que misturava contas que rodam as
+      # duas campanhas ao mesmo tempo com números diferentes cada uma.
+      'lead_formulario' => %w[lead onsite_conversion.lead_grouped],
+      'lead_site' => %w[offsite_conversion.fb_pixel_lead],
       # Sem action_type nos Insights da Graph API — não dá pra automatizar.
       'seguidores' => [],
       'outro' => []
