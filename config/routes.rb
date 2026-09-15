@@ -959,6 +959,7 @@ Rails.application.routes.draw do
         # Site de imóveis — catálogo de imóveis ativos (item_type "imovel"),
         # público, sem API key (mesmo padrão do cardápio digital acima).
         get 'real_estate', to: 'real_estate#show'
+        post 'real_estate/leads', to: 'real_estate#create_lead'
 
         resources :csat_survey, only: [:show, :update]
       end

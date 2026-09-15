@@ -13,7 +13,7 @@ module RealEstateListingSerializer
   METADATA_FIELDS = %w[
     tags estado cidade bairro endereco numero cep
     quartos banheiros vagas suites perto_metro condominio iptu vantagens
-    latitude longitude
+    latitude longitude contact_mode
   ].freeze
 
   def serialize(product)

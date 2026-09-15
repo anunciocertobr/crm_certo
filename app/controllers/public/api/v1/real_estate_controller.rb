@@ -21,7 +21,33 @@ class Public::Api::V1::RealEstateController < PublicController
     }
   end
 
+  # POST /public/api/v1/real_estate/leads — captura de lead quando o imóvel
+  # está configurado com contato via formulário (metadata['contact_mode'] ==
+  # 'formulario'), em vez de WhatsApp direto. Sem API key, mesmo padrão do
+  # resto deste controller; a criação de fato (contact + pipeline_item no
+  # kanban "Imobiliária") é feita por Public::RealEstate::LeadCreationService.
+  def create_lead
+    product = Product.active.by_item_type('imovel').find_by(id: lead_params[:product_id])
+    unless product
+      render json: { success: false, error: 'Imóvel não encontrado' }, status: :not_found
+      return
+    end
+
+    result = Public::RealEstate::LeadCreationService.new(product: product, params: lead_params).perform
+
+    if result[:success]
+      render json: { success: true, message: 'Lead recebido com sucesso' }, status: :created
+    else
+      errors = Array(result[:errors].presence || result[:error])
+      render json: { success: false, error: errors.join(', ') }, status: :unprocessable_entity
+    end
+  end
+
   private
+
+  def lead_params
+    params.permit(:product_id, :name, :email, :phone, :message)
+  end
 
   # Aparência configurável em Organização > Imobiliária, mais o número de
   # WhatsApp usado no botão "Falar sobre este imóvel" de cada card — o
