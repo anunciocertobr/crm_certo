@@ -56,7 +56,13 @@ class Public::RealEstate::LeadCreationService
       name: PIPELINE_NAME,
       pipeline_type: 'custom',
       scope: 'empresa',
-      created_by: system_user
+      created_by: system_user,
+      # visibility default é "private" (só o created_by enxerga) — como
+      # quem cria este pipeline é um usuário de sistema (ver system_user),
+      # sem isso nenhum atendente veria os leads do site de imóveis na
+      # lista de Pipelines. "public" replica o mesmo acesso amplo que um
+      # pipeline padrão (is_default) já tem.
+      visibility: :public
     )
   end
 
