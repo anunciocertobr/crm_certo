@@ -68,7 +68,7 @@ class Product < ApplicationRecord
   include Labelable
 
   KINDS    = %w[physical digital].freeze
-  ITEM_TYPES = %w[produto produto_ml servico].freeze
+  ITEM_TYPES = %w[produto produto_ml servico imovel].freeze
   STATUSES = %w[active inactive draft].freeze
   ALLOWED_CURRENCIES = %w[BRL USD EUR].freeze
   URL_REGEXP = %r{\Ahttps?://[^\s]+\z}.freeze

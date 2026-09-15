@@ -956,6 +956,10 @@ Rails.application.routes.draw do
         get 'menu/orders/:token/status', to: 'menu_orders#status'
         post 'menu/google_login', to: 'menu_google_auth#login'
 
+        # Site de imóveis — catálogo de imóveis ativos (item_type "imovel"),
+        # público, sem API key (mesmo padrão do cardápio digital acima).
+        get 'real_estate', to: 'real_estate#show'
+
         resources :csat_survey, only: [:show, :update]
       end
     end

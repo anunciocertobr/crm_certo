@@ -79,6 +79,15 @@ module Api
             MENU_ICON_COLOR MENU_TEXT_COLOR MENU_TITLE_COLOR MENU_COMPANY_NAME_COLOR
             MENU_GTM_ID MENU_WHATSAPP_NUMBER MENU_ORDER_INBOX_ID
           ],
+          # Organização > Imobiliária — sem inbox: o contato de cada imóvel é um
+          # link wa.me aberto no navegador do visitante, não um pedido roteado
+          # por um canal integrado (ao contrário do cardápio digital acima).
+          'real_estate' => %w[
+            REAL_ESTATE_COMPANY_NAME REAL_ESTATE_HEADER_COLOR REAL_ESTATE_BACKGROUND_COLOR
+            REAL_ESTATE_FOOTER_COLOR REAL_ESTATE_ICON_COLOR REAL_ESTATE_TEXT_COLOR
+            REAL_ESTATE_TITLE_COLOR REAL_ESTATE_COMPANY_NAME_COLOR REAL_ESTATE_GTM_ID
+            REAL_ESTATE_WHATSAPP_NUMBER
+          ],
           # Organização > Dados da Empresa. ORG_UNIDADES_JSON/ORG_COLORS_JSON hold
           # JSON-stringified arrays (units w/ opening hours, color tokens) — stored
           # as opaque strings so they fit the same flat key/value config mechanism
