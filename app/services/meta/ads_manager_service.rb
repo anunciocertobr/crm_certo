@@ -487,7 +487,7 @@ class Meta::AdsManagerService
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
     return Result.new(success: false, error: 'Nenhuma Página do Facebook cadastrada.') unless @page
 
-    get("/#{@page.page_id}/leadgen_forms", fields: 'id,name,status,leads_count,created_time')
+    get("/#{@page.page_id}/leadgen_forms", { fields: 'id,name,status,leads_count,created_time' }, token: @page.page_access_token)
   end
 
   def create_leadgen_form(name:, questions:, privacy_policy_url:, privacy_policy_link_text: 'Política de Privacidade', thank_you_title: nil, thank_you_body: nil)
@@ -510,7 +510,7 @@ class Meta::AdsManagerService
       }.to_json
     end
 
-    post("/#{@page.page_id}/leadgen_forms", body)
+    post("/#{@page.page_id}/leadgen_forms", body, token: @page.page_access_token)
   end
 
   # --- Públicos (Custom Audiences) ---
@@ -630,7 +630,23 @@ class Meta::AdsManagerService
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
     return Result.new(success: false, error: 'Categoria de direcionamento inválida.') unless TARGETING_CLASSES.include?(category)
 
-    get('/search', type: 'adTargetingCategory', class: category, q: query, limit: 25)
+    if category == 'interests'
+      # type=adinterest é o mesmo endpoint que a busca de interesses do
+      # Gerenciador de Anúncios usa — filtra por texto de verdade e já
+      # devolve tamanho de público.
+      get('/search', { type: 'adinterest', q: query, limit: 25 })
+    else
+      # type=adTargetingCategory (behaviors/demographics) IGNORA `q` — é um
+      # endpoint de listagem por classe, não de busca por texto (confirmado
+      # testando: "compra" e "casado" devolvem a mesma lista genérica de
+      # sempre). Como cada classe tem no máximo algumas centenas de itens,
+      # busca a lista inteira uma vez e filtra por substring aqui.
+      result = get('/search', { type: 'adTargetingCategory', class: category, limit: 1000 })
+      return result unless result.success
+
+      filtered = result.data.select { |item| item['name'].to_s.downcase.include?(query.to_s.downcase) }
+      Result.new(success: true, data: filtered.first(25))
+    end
   end
 
   # Interesses relacionados aos já escolhidos — mesmo recurso do "Sugestões"
@@ -1203,12 +1219,16 @@ class Meta::AdsManagerService
     questions = campanha['lead_questions'].presence || [{ type: 'FULL_NAME' }, { type: 'EMAIL' }]
     privacy_url = campanha['privacy_policy_url'].presence || 'https://www.anunciocertobr.com.br/privacidade'
 
-    post("/#{@page.page_id}/leadgen_forms", {
-           name: campanha['lead_form_name'].presence || "#{campanha['name']} - Formulário",
-           questions: questions.to_json,
-           privacy_policy: { url: privacy_url, link_text: 'Política de Privacidade' }.to_json,
-           follow_up_action_url: campanha['follow_up_action_url'].presence || "https://www.facebook.com/#{@page.page_id}"
-         })
+    post(
+      "/#{@page.page_id}/leadgen_forms",
+      {
+        name: campanha['lead_form_name'].presence || "#{campanha['name']} - Formulário",
+        questions: questions.to_json,
+        privacy_policy: { url: privacy_url, link_text: 'Política de Privacidade' }.to_json,
+        follow_up_action_url: campanha['follow_up_action_url'].presence || "https://www.facebook.com/#{@page.page_id}"
+      },
+      token: @page.page_access_token
+    )
   end
 
   # POST multipart de verdade (a Graph API não aceita vídeo como campo de
@@ -1262,9 +1282,15 @@ class Meta::AdsManagerService
     nil
   end
 
-  def get(path, params)
+  # token: por padrão o user_access_token (o que toda a API de Marketing usa —
+  # contas de anúncio, campanhas etc.). Alguns edges de PÁGINA (ex.:
+  # /{page_id}/leadgen_forms) exigem especificamente o Page Access Token —
+  # a Graph API rejeita com "(#190) This method must be called with a Page
+  # Access Token" se receber o token de usuário aqui, mesmo ele tendo a
+  # permissão. Nesses casos quem chama passa `token: @page.page_access_token`.
+  def get(path, params, token: @token)
     uri = URI("#{BASE_URL}#{path}")
-    uri.query = URI.encode_www_form(params.merge(access_token: @token))
+    uri.query = URI.encode_www_form(params.merge(access_token: token))
 
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
@@ -1284,14 +1310,15 @@ class Meta::AdsManagerService
     Result.new(success: false, error: 'Erro inesperado ao consultar a Graph API da Meta.')
   end
 
-  def post(path, body)
+  # Ver comentário de `get` acima sobre o parâmetro `token:`.
+  def post(path, body, token: @token)
     uri = URI("#{BASE_URL}#{path}")
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
     http.read_timeout = 30
 
     request = Net::HTTP::Post.new(uri.request_uri)
-    request.set_form_data(body.merge(access_token: @token))
+    request.set_form_data(body.merge(access_token: token))
 
     response = http.request(request)
     parsed = JSON.parse(response.body)
