@@ -487,7 +487,7 @@ class Meta::AdsManagerService
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
     return Result.new(success: false, error: 'Nenhuma Página do Facebook cadastrada.') unless @page
 
-    get("/#{@page.page_id}/leadgen_forms", { fields: 'id,name,status,leads_count,created_time' }, token: @page.page_access_token)
+    get("/#{@page.page_id}/leadgen_forms", { fields: 'id,name,status,leads_count,created_time' }, @page.page_access_token)
   end
 
   def create_leadgen_form(name:, questions:, privacy_policy_url:, privacy_policy_link_text: 'Política de Privacidade', thank_you_title: nil, thank_you_body: nil)
@@ -510,7 +510,7 @@ class Meta::AdsManagerService
       }.to_json
     end
 
-    post("/#{@page.page_id}/leadgen_forms", body, token: @page.page_access_token)
+    post("/#{@page.page_id}/leadgen_forms", body, @page.page_access_token)
   end
 
   # --- Públicos (Custom Audiences) ---
@@ -1227,7 +1227,7 @@ class Meta::AdsManagerService
         privacy_policy: { url: privacy_url, link_text: 'Política de Privacidade' }.to_json,
         follow_up_action_url: campanha['follow_up_action_url'].presence || "https://www.facebook.com/#{@page.page_id}"
       },
-      token: @page.page_access_token
+      @page.page_access_token
     )
   end
 
@@ -1282,15 +1282,21 @@ class Meta::AdsManagerService
     nil
   end
 
-  # token: por padrão o user_access_token (o que toda a API de Marketing usa —
-  # contas de anúncio, campanhas etc.). Alguns edges de PÁGINA (ex.:
-  # /{page_id}/leadgen_forms) exigem especificamente o Page Access Token —
-  # a Graph API rejeita com "(#190) This method must be called with a Page
-  # Access Token" se receber o token de usuário aqui, mesmo ele tendo a
-  # permissão. Nesses casos quem chama passa `token: @page.page_access_token`.
-  def get(path, params, token: @token)
+  # override_token: por padrão nil (usa o user_access_token — o que toda a
+  # API de Marketing usa, contas de anúncio, campanhas etc.). Alguns edges de
+  # PÁGINA (ex.: /{page_id}/leadgen_forms) exigem especificamente o Page
+  # Access Token — a Graph API rejeita com "(#190) This method must be
+  # called with a Page Access Token" se receber o token de usuário aqui,
+  # mesmo ele tendo a permissão. Nesses casos quem chama passa
+  # `@page.page_access_token` como 3º argumento POSICIONAL, não nomeado —
+  # um parâmetro nomeado aqui quebraria toda chamada `get(path, campo: val)`
+  # já existente no arquivo (Ruby 3 trata `campo: val` como keyword args
+  # assim que o método declara QUALQUER parâmetro nomeado, mesmo que a
+  # chamada não tivesse nada a ver com ele — já aconteceu, ver commit da
+  # correção).
+  def get(path, params, override_token = nil)
     uri = URI("#{BASE_URL}#{path}")
-    uri.query = URI.encode_www_form(params.merge(access_token: token))
+    uri.query = URI.encode_www_form(params.merge(access_token: override_token || @token))
 
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
@@ -1310,15 +1316,15 @@ class Meta::AdsManagerService
     Result.new(success: false, error: 'Erro inesperado ao consultar a Graph API da Meta.')
   end
 
-  # Ver comentário de `get` acima sobre o parâmetro `token:`.
-  def post(path, body, token: @token)
+  # Ver comentário de `get` acima sobre `override_token` ser posicional.
+  def post(path, body, override_token = nil)
     uri = URI("#{BASE_URL}#{path}")
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
     http.read_timeout = 30
 
     request = Net::HTTP::Post.new(uri.request_uri)
-    request.set_form_data(body.merge(access_token: token))
+    request.set_form_data(body.merge(access_token: override_token || @token))
 
     response = http.request(request)
     parsed = JSON.parse(response.body)
