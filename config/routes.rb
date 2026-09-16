@@ -132,6 +132,8 @@ Rails.application.routes.draw do
         put 'work_order_pipeline_config', to: 'work_order_pipeline_configs#update'
         resources :motoboys, only: [:index, :create, :update, :destroy]
         resources :motoboy_deliveries, only: [:index, :create, :update, :destroy]
+        get 'real_estate/agents_kanban_stats', to: 'real_estate_agents#kanban_stats'
+        get 'real_estate/agents/:agent_id/leads', to: 'real_estate_agents#leads'
       end
 
       # Server-side proxy for the Marketing AI tools — keeps ElevenLabs/Groq/
