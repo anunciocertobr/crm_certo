@@ -71,15 +71,28 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
       campanha = params[:campanha].is_a?(ActionController::Parameters) ? params[:campanha].to_unsafe_h : (params[:campanha] || {})
       respond(service.create_campaign_full(ad_account_id: params.require(:id_conta_anuncio), campanha: campanha))
     # --- Aba "Criação Meta" (Marketing) ---
+    when 'listar_paginas'
+      respond(service.pages_for_business(business_id: params.require(:id_bm)))
     when 'listar_formularios_lead'
-      respond(service.leadgen_forms)
+      respond(service.leadgen_forms(page_id: params.require(:id_pagina)))
+    when 'detalhe_formulario_lead'
+      respond(service.leadgen_form_detail(page_id: params.require(:id_pagina), form_id: params.require(:id_formulario)))
+    when 'atualizar_status_formulario_lead'
+      respond(service.update_leadgen_form_status(
+        page_id: params.require(:id_pagina),
+        form_id: params.require(:id_formulario),
+        status: params.require(:status)
+      ))
     when 'criar_formulario_lead'
-      respond(service.create_leadgen_form(
-        name: params.require(:name),
-        questions: parse_questions(params[:questions]),
-        privacy_policy_url: params.require(:privacy_policy_url),
-        thank_you_title: params[:thank_you_title],
-        thank_you_body: params[:thank_you_body]
+      respond(service.create_leadgen_form(**leadgen_form_params))
+    when 'duplicar_formulario_lead'
+      overrides = params[:overrides].is_a?(ActionController::Parameters) ? params[:overrides].to_unsafe_h.symbolize_keys : {}
+      overrides[:questions] = parse_json_array(overrides[:questions]) if overrides[:questions].present?
+      respond(service.duplicate_leadgen_form(
+        source_page_id: params.require(:id_pagina_origem),
+        form_id: params.require(:id_formulario),
+        target_page_id: params.require(:id_pagina_destino),
+        overrides: overrides
       ))
     when 'listar_publicos'
       respond(service.custom_audiences(ad_account_id: params.require(:id_conta_anuncio)))
@@ -116,7 +129,7 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
     when 'buscar_direcionamento'
       respond(service.search_targeting(query: params.require(:q), category: params.require(:categoria)))
     when 'sugestoes_direcionamento'
-      respond(service.targeting_suggestions(interest_names: parse_questions(params[:interesses])))
+      respond(service.targeting_suggestions(interest_names: parse_json_array(params[:interesses])))
     when 'estimar_alcance'
       respond(service.reach_estimate(
         ad_account_id: params.require(:id_conta_anuncio),
@@ -128,6 +141,28 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
         name: params.require(:name),
         targeting: parse_json_object(params[:targeting])
       ))
+    # --- Listas de direcionamento (locais, não são objeto da Graph API) ---
+    when 'listar_listas_direcionamento'
+      render json: TargetingList.alphabetical.as_json(only: %i[id name items])
+    when 'criar_lista_direcionamento'
+      lista = TargetingList.new(name: params.require(:name), items: parse_json_array(params[:items]))
+      if lista.save
+        render json: lista.as_json(only: %i[id name items])
+      else
+        error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD, lista.errors.full_messages.to_sentence, status: :unprocessable_entity)
+      end
+    when 'atualizar_lista_direcionamento'
+      lista = TargetingList.find(params.require(:id))
+      lista.name = params[:name] if params[:name].present?
+      lista.items = parse_json_array(params[:items]) if params[:items].present?
+      if lista.save
+        render json: lista.as_json(only: %i[id name items])
+      else
+        error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD, lista.errors.full_messages.to_sentence, status: :unprocessable_entity)
+      end
+    when 'excluir_lista_direcionamento'
+      TargetingList.find(params.require(:id)).destroy
+      render json: { success: true }
     else
       error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD, "Ação desconhecida: #{params[:acao]}", status: :unprocessable_entity)
     end
@@ -160,10 +195,11 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
     edicao.slice(*allowed)
   end
 
-  # `questions` chega do front como JSON (array de {type} ou {type, key,
-  # label} pra CUSTOM) — mesma forma que a Graph API espera, só precisa
-  # desserializar antes de repassar pro service.
-  def parse_questions(raw)
+  # Usado tanto pra `questions` (array de {type} ou {type, key, label,
+  # options} pra CUSTOM) quanto pra `greeting_content`/`interesses` — todos
+  # chegam do front como JSON de um array, mesma forma que a Graph API
+  # espera, só precisa desserializar antes de repassar pro service.
+  def parse_json_array(raw)
     return [] if raw.blank?
     return raw if raw.is_a?(Array)
 
@@ -186,6 +222,24 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
     parsed.is_a?(Hash) ? parsed : {}
   rescue JSON::ParserError
     {}
+  end
+
+  def leadgen_form_params
+    {
+      page_id: params.require(:id_pagina),
+      name: params.require(:name),
+      questions: parse_json_array(params[:questions]),
+      privacy_policy_url: params[:privacy_policy_url],
+      privacy_policy_link_text: params[:privacy_policy_link_text],
+      greeting_title: params[:greeting_title],
+      greeting_content: parse_json_array(params[:greeting_content]),
+      greeting_button_text: params[:greeting_button_text],
+      thank_you_title: params[:thank_you_title],
+      thank_you_body: params[:thank_you_body],
+      thank_you_button_type: params[:thank_you_button_type],
+      thank_you_button_text: params[:thank_you_button_text],
+      thank_you_website_url: params[:thank_you_website_url]
+    }
   end
 
   # Busca email/telefone direto do banco a partir dos ids escolhidos na UI —

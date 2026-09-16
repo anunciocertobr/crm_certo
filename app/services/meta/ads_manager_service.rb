@@ -482,35 +482,156 @@ class Meta::AdsManagerService
   # (privado, mais abaixo) continua existindo só pro fluxo automático de
   # campanha com objetivo de leads; este é o formulário que o usuário monta
   # à mão, com as próprias perguntas/política de privacidade.
-
-  def leadgen_forms
+  #
+  # Formulários de lead pertencem a uma PÁGINA (não à conta de anúncio) — o
+  # picker "BM > Conta" das outras abas não serve aqui. `pages_for_business`
+  # espelha `ad_accounts` (owned + client), e `page_access_token_for` busca
+  # o token de PÁGINA sob demanda via Graph API (a Graph API exige
+  # especificamente esse token pra /leadgen_forms — o user_access_token dá
+  # "(#190) This method must be called with a Page Access Token" mesmo
+  # tendo a permissão). Isso evita depender só da única linha em
+  # Channel::FacebookPage: qualquer Página que a BM escolhida enxergue pode
+  # ser usada, não só a que já está conectada como canal de mensagens.
+  def pages_for_business(business_id:)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
-    return Result.new(success: false, error: 'Nenhuma Página do Facebook cadastrada.') unless @page
 
-    get("/#{@page.page_id}/leadgen_forms", { fields: 'id,name,status,leads_count,created_time' }, @page.page_access_token)
+    fields = 'id,name'
+    owned = get("/#{business_id}/owned_pages", fields: fields)
+    return owned unless owned.success
+
+    client = get("/#{business_id}/client_pages", fields: fields)
+    return client unless client.success
+
+    Result.new(success: true, data: (owned.data + client.data).uniq { |p| p['id'] })
   end
 
-  def create_leadgen_form(name:, questions:, privacy_policy_url:, privacy_policy_link_text: 'Política de Privacidade', thank_you_title: nil, thank_you_body: nil)
+  def page_access_token_for(page_id:)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
-    return Result.new(success: false, error: 'Nenhuma Página do Facebook cadastrada.') unless @page
+
+    result = get("/#{page_id}", fields: 'access_token')
+    return result unless result.success
+    return Result.new(success: false, error: 'Não consegui obter o token desta Página — confira se a conta conectada é admin dela.') if result.data['access_token'].blank?
+
+    Result.new(success: true, data: result.data['access_token'])
+  end
+
+  def leadgen_forms(page_id:)
+    token = resolve_page_token(page_id)
+    return token unless token.success
+
+    get("/#{page_id}/leadgen_forms", { fields: 'id,name,status,leads_count,created_time' }, token.data)
+  end
+
+  def leadgen_form_detail(page_id:, form_id:)
+    token = resolve_page_token(page_id)
+    return token unless token.success
+
+    # A Graph API não devolve `privacy_policy` como campo de leitura direto
+    # (só de escrita na criação) — quem volta é `legal_content.privacy_policy`.
+    get(
+      "/#{form_id}",
+      { fields: 'id,name,status,questions,legal_content{privacy_policy},context_card,thank_you_page,follow_up_action_url' },
+      token.data
+    )
+  end
+
+  def update_leadgen_form_status(page_id:, form_id:, status:)
+    token = resolve_page_token(page_id)
+    return token unless token.success
+
+    post("/#{form_id}", { status: status }, token.data)
+  end
+
+  # questions: array de {type:} — pra CUSTOM, também {key:, label:} e,
+  # quando for múltipla escolha, {options: [{key:, value:}, ...]}.
+  # privacy_policy_url: a Graph API exige um dos dois (essa ou
+  # legal_content_id, mais avançado) pra criar qualquer formulário — não dá
+  # pra tornar opcional de verdade; cai pro site da empresa quando em
+  # branco, então a pessoa não PRECISA digitar nada, mas a Meta sempre
+  # recebe uma URL real.
+  def create_leadgen_form(
+    page_id:, name:, questions:,
+    privacy_policy_url: nil, privacy_policy_link_text: 'Política de Privacidade',
+    greeting_title: nil, greeting_content: nil, greeting_button_text: 'Continuar',
+    thank_you_title: nil, thank_you_body: nil, thank_you_button_type: nil,
+    thank_you_button_text: nil, thank_you_website_url: nil
+  )
     return Result.new(success: false, error: 'Informe ao menos uma pergunta.') if questions.blank?
+
+    token = resolve_page_token(page_id)
+    return token unless token.success
 
     body = {
       name: name,
       questions: questions.to_json,
-      privacy_policy: { url: privacy_policy_url, link_text: privacy_policy_link_text }.to_json,
-      follow_up_action_url: "https://www.facebook.com/#{@page.page_id}"
+      privacy_policy: {
+        url: privacy_policy_url.presence || 'https://www.anunciocertobr.com.br/privacidade',
+        link_text: privacy_policy_link_text.presence || 'Política de Privacidade'
+      }.to_json,
+      follow_up_action_url: thank_you_website_url.presence || "https://www.facebook.com/#{page_id}"
     }
-    if thank_you_title.present?
-      body[:thank_you_page] = {
-        title: thank_you_title,
-        body: thank_you_body.presence || 'Obrigado! Entraremos em contato em breve.',
-        button_type: 'VIEW_WEBSITE',
-        button_text: 'Fechar'
+
+    if greeting_title.present?
+      body[:context_card] = {
+        title: greeting_title,
+        content: Array(greeting_content.presence || []),
+        button_text: greeting_button_text.presence || 'Continuar',
+        style: 'PARAGRAPH_STYLE'
       }.to_json
     end
 
-    post("/#{@page.page_id}/leadgen_forms", body, @page.page_access_token)
+    if thank_you_title.present?
+      thank_you = {
+        title: thank_you_title,
+        body: thank_you_body.presence || 'Obrigado! Entraremos em contato em breve.',
+        button_type: thank_you_button_type.presence || 'VIEW_WEBSITE',
+        button_text: thank_you_button_text.presence || 'Fechar'
+      }
+      thank_you[:website_url] = thank_you_website_url if thank_you_website_url.present?
+      body[:thank_you_page] = thank_you.to_json
+    end
+
+    post("/#{page_id}/leadgen_forms", body, token.data)
+  end
+
+  # A Graph API não tem "editar" um formulário depois de criado (nome,
+  # perguntas etc. são imutáveis pra sempre — só o status ACTIVE/ARCHIVED
+  # pode mudar, via update_leadgen_form_status). "Duplicar" é o caminho real
+  # pra algo parecido com editar: busca os dados completos do formulário de
+  # origem e cria um novo (na mesma Página ou em outra) com esses dados +
+  # o que vier em `overrides`.
+  def duplicate_leadgen_form(source_page_id:, form_id:, target_page_id:, overrides: {})
+    detail = leadgen_form_detail(page_id: source_page_id, form_id: form_id)
+    return detail unless detail.success
+
+    source = detail.data
+    privacy = source.dig('legal_content', 'privacy_policy') || {}
+    context_card = source['context_card']
+    thank_you = source['thank_you_page']
+    # A leitura devolve `id` (sempre) e `key`/`label` (pra TODO tipo, mesmo
+    # os padrão) em cada pergunta — a escrita rejeita `id` sempre
+    # ("Invalid keys") e rejeita `label` em perguntas que não sejam CUSTOM
+    # ("Rótulo especificado para perguntas não personalizadas"). Só CUSTOM
+    # pode (e precisa) levar key/label/options de volta.
+    source_questions = (source['questions'] || []).map do |q|
+      q['type'] == 'CUSTOM' ? q.slice('type', 'key', 'label', 'options') : q.slice('type')
+    end
+
+    create_leadgen_form(
+      page_id: target_page_id,
+      name: overrides[:name].presence || "#{source['name']} - Cópia",
+      questions: overrides[:questions].presence || source_questions,
+      privacy_policy_url: overrides[:privacy_policy_url].presence || privacy['url'],
+      privacy_policy_link_text: overrides[:privacy_policy_link_text].presence || privacy['link_text'],
+      greeting_title: overrides[:greeting_title].presence || context_card&.dig('title'),
+      greeting_content: overrides[:greeting_content].presence || context_card&.dig('content'),
+      greeting_button_text: overrides[:greeting_button_text].presence || context_card&.dig('button_text'),
+      thank_you_title: overrides[:thank_you_title].presence || thank_you&.dig('title'),
+      thank_you_body: overrides[:thank_you_body].presence || thank_you&.dig('body'),
+      thank_you_button_type: overrides[:thank_you_button_type].presence || thank_you&.dig('button_type'),
+      thank_you_button_text: overrides[:thank_you_button_text].presence || thank_you&.dig('button_text'),
+      thank_you_website_url: overrides[:thank_you_website_url].presence || thank_you&.dig('website_url')
+    )
   end
 
   # --- Públicos (Custom Audiences) ---
@@ -683,6 +804,13 @@ class Meta::AdsManagerService
   end
 
   private
+
+  def resolve_page_token(page_id)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+    return Result.new(success: false, error: 'Selecione uma Página.') if page_id.blank?
+
+    page_access_token_for(page_id: page_id)
+  end
 
   # Resume o `targeting` de uma lista de conjuntos de anúncio num único
   # público "representativo" pra pré-preencher a conta em Metas de
