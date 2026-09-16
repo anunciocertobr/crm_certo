@@ -20,6 +20,7 @@ class Public::RealEstate::LeadCreationService
 
   def perform
     pipeline, stage = resolve_pipeline_and_stage
+    assigned_agent = Public::RealEstate::AgentAssignmentService.new(pipeline: pipeline).assign
 
     Public::Leads::CreationService.new(
       lead_params: {
@@ -36,7 +37,9 @@ class Public::RealEstate::LeadCreationService
         custom_fields: {
           'product_id' => @product.id,
           'product_name' => @product.name,
-          'message' => @params[:message]
+          'message' => @params[:message],
+          'assigned_agent_id' => assigned_agent&.dig('id'),
+          'assigned_agent_name' => assigned_agent&.dig('name')
         }.compact,
         metadata: { lead_source: 'real_estate_site' }
       }
