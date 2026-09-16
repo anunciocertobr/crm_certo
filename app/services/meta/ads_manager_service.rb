@@ -1,6 +1,7 @@
 require 'net/http'
 require 'base64'
 require 'securerandom'
+require 'digest'
 
 # Meta::AdsManagerService - substitui o workflow n8n "painel meta relatorios
 # campanhas gerenciador de anuncio" (o "Painel Tráfego"): navegar
@@ -474,6 +475,151 @@ class Meta::AdsManagerService
     return step_error(creative, 'criativo') unless creative.success
 
     create_ad_only(act: act, adset_id: target_adset_id, creative_id: creative.data['id'], campanha: campanha)
+  end
+
+  # --- Aba "Criação Meta" (Marketing) — formulários de lead avulsos e
+  # públicos, independentes da criação de campanha. `create_lead_form`
+  # (privado, mais abaixo) continua existindo só pro fluxo automático de
+  # campanha com objetivo de leads; este é o formulário que o usuário monta
+  # à mão, com as próprias perguntas/política de privacidade.
+
+  def leadgen_forms
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+    return Result.new(success: false, error: 'Nenhuma Página do Facebook cadastrada.') unless @page
+
+    get("/#{@page.page_id}/leadgen_forms", fields: 'id,name,status,leads_count,created_time')
+  end
+
+  def create_leadgen_form(name:, questions:, privacy_policy_url:, privacy_policy_link_text: 'Política de Privacidade', thank_you_title: nil, thank_you_body: nil)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+    return Result.new(success: false, error: 'Nenhuma Página do Facebook cadastrada.') unless @page
+    return Result.new(success: false, error: 'Informe ao menos uma pergunta.') if questions.blank?
+
+    body = {
+      name: name,
+      questions: questions.to_json,
+      privacy_policy: { url: privacy_policy_url, link_text: privacy_policy_link_text }.to_json,
+      follow_up_action_url: "https://www.facebook.com/#{@page.page_id}"
+    }
+    if thank_you_title.present?
+      body[:thank_you_page] = {
+        title: thank_you_title,
+        body: thank_you_body.presence || 'Obrigado! Entraremos em contato em breve.',
+        button_type: 'VIEW_WEBSITE',
+        button_text: 'Fechar'
+      }.to_json
+    end
+
+    post("/#{@page.page_id}/leadgen_forms", body)
+  end
+
+  # --- Públicos (Custom Audiences) ---
+
+  def custom_audiences(ad_account_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    get(
+      "/act_#{id}/customaudiences",
+      fields: 'id,name,subtype,description,approximate_count_lower_bound,approximate_count_upper_bound,delivery_status,operation_status',
+      limit: 200
+    )
+  end
+
+  def pixels(ad_account_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    get("/act_#{id}/adspixels", fields: 'id,name')
+  end
+
+  # retention_days: janela de quem entra no público (1-180, limite da própria
+  # Graph API). Sem url_contains, usa todo mundo que visitou o site
+  # (PageView) em vez de uma página específica.
+  def create_website_audience(ad_account_id:, name:, pixel_id:, retention_days:, url_contains: nil, description: nil)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    filter = if url_contains.present?
+               { field: 'url', operator: 'i_contains', value: url_contains }
+             else
+               { field: 'event', operator: 'eq', value: 'PageView' }
+             end
+    rule = {
+      inclusions: {
+        operator: 'or',
+        rules: [
+          {
+            event_sources: [{ type: 'pixel', id: pixel_id }],
+            retention_seconds: retention_days.to_i.clamp(1, 180) * 86_400,
+            filter: { operator: 'and', filters: [filter] }
+          }
+        ]
+      }
+    }
+
+    post("/act_#{id}/customaudiences", {
+      name: name,
+      subtype: 'WEBSITE',
+      description: description,
+      rule: rule.to_json
+    }.compact)
+  end
+
+  # ratio: 0.01 a 0.20 (1% a 20% do país, granularidade mínima da própria
+  # Graph API pra Lookalike).
+  def create_lookalike_audience(ad_account_id:, name:, origin_audience_id:, country:, ratio:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    post("/act_#{id}/customaudiences", {
+      name: name,
+      subtype: 'LOOKALIKE',
+      origin_audience_id: origin_audience_id,
+      lookalike_spec: { type: 'similarity', country: country, ratio: ratio.to_f.clamp(0.01, 0.20) }.to_json
+    })
+  end
+
+  # Cria só o "balde" vazio — a população de fato (hash dos contatos) é um
+  # passo separado, add_contacts_to_audience, porque a Graph API já trata
+  # como duas chamadas diferentes (POST /customaudiences depois POST
+  # /{id}/users) e a UI pede o público criado antes de deixar escolher quem
+  # entra nele.
+  def create_customer_list_audience(ad_account_id:, name:, description: nil)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    post("/act_#{id}/customaudiences", {
+      name: name,
+      subtype: 'CUSTOM',
+      description: description,
+      customer_file_source: 'USER_PROVIDED_ONLY'
+    }.compact)
+  end
+
+  # contacts: array de {email:, phone:}. Email/telefone só saem daqui como
+  # SHA-256 do valor normalizado (email minúsculo/sem espaços, telefone só
+  # dígitos) — exatamente o que a Graph API exige pra Custom Audience por
+  # lista de clientes; nenhum dado em claro chega na Meta.
+  def add_contacts_to_audience(audience_id:, contacts:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+    return Result.new(success: false, error: 'Nenhum contato com email ou telefone válido.') if contacts.blank?
+
+    rows = contacts.filter_map do |c|
+      email_hash = hash_pii(c[:email]&.strip&.downcase)
+      phone_hash = hash_pii(c[:phone].to_s.gsub(/\D/, ''))
+      [email_hash || '', phone_hash || ''] if email_hash || phone_hash
+    end
+    return Result.new(success: false, error: 'Nenhum contato com email ou telefone válido.') if rows.empty?
+
+    results = rows.each_slice(10_000).map do |batch|
+      post("/#{audience_id}/users", payload: { schema: %w[EMAIL PHONE], data: batch }.to_json)
+    end
+
+    failed = results.find { |r| !r.success }
+    return failed if failed
+
+    Result.new(success: true, data: { 'uploaded' => rows.size })
   end
 
   private
@@ -981,6 +1127,17 @@ class Meta::AdsManagerService
     return nil unless result.success
 
     result.data.first&.dig('id')
+  end
+
+  # Normalização exigida pela Graph API pra Custom Audience por lista de
+  # clientes antes do hash: sem isso, "João@Email.com " e "joao@email.com"
+  # geram hashes diferentes e a Meta não casa o mesmo cliente que já
+  # conhece — o valor já deve chegar aqui em minúsculo/trim (email) ou só
+  # dígitos (telefone), feito por quem chama.
+  def hash_pii(value)
+    return nil if value.blank?
+
+    Digest::SHA256.hexdigest(value)
   end
 
   # ON_AD: o formulário abre dentro do próprio anúncio (Instant Form) — é o

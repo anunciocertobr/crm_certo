@@ -70,6 +70,49 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
     when 'criar_campanha'
       campanha = params[:campanha].is_a?(ActionController::Parameters) ? params[:campanha].to_unsafe_h : (params[:campanha] || {})
       respond(service.create_campaign_full(ad_account_id: params.require(:id_conta_anuncio), campanha: campanha))
+    # --- Aba "Criação Meta" (Marketing) ---
+    when 'listar_formularios_lead'
+      respond(service.leadgen_forms)
+    when 'criar_formulario_lead'
+      respond(service.create_leadgen_form(
+        name: params.require(:name),
+        questions: parse_questions(params[:questions]),
+        privacy_policy_url: params.require(:privacy_policy_url),
+        thank_you_title: params[:thank_you_title],
+        thank_you_body: params[:thank_you_body]
+      ))
+    when 'listar_publicos'
+      respond(service.custom_audiences(ad_account_id: params.require(:id_conta_anuncio)))
+    when 'listar_pixels'
+      respond(service.pixels(ad_account_id: params.require(:id_conta_anuncio)))
+    when 'criar_publico_site'
+      respond(service.create_website_audience(
+        ad_account_id: params.require(:id_conta_anuncio),
+        name: params.require(:name),
+        pixel_id: params.require(:pixel_id),
+        retention_days: params.require(:retention_days),
+        url_contains: params[:url_contains],
+        description: params[:description]
+      ))
+    when 'criar_publico_semelhante'
+      respond(service.create_lookalike_audience(
+        ad_account_id: params.require(:id_conta_anuncio),
+        name: params.require(:name),
+        origin_audience_id: params.require(:origin_audience_id),
+        country: params.require(:country),
+        ratio: params.require(:ratio)
+      ))
+    when 'criar_publico_clientes'
+      respond(service.create_customer_list_audience(
+        ad_account_id: params.require(:id_conta_anuncio),
+        name: params.require(:name),
+        description: params[:description]
+      ))
+    when 'adicionar_clientes_publico'
+      respond(service.add_contacts_to_audience(
+        audience_id: params.require(:id_publico),
+        contacts: contacts_from_ids(params[:contact_ids])
+      ))
     else
       error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD, "Ação desconhecida: #{params[:acao]}", status: :unprocessable_entity)
     end
@@ -100,5 +143,29 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
   def filtered_edicao(nivel, edicao)
     allowed = Meta::AdsManagerService::EDITABLE_FIELDS[nivel] || []
     edicao.slice(*allowed)
+  end
+
+  # `questions` chega do front como JSON (array de {type} ou {type, key,
+  # label} pra CUSTOM) — mesma forma que a Graph API espera, só precisa
+  # desserializar antes de repassar pro service.
+  def parse_questions(raw)
+    return [] if raw.blank?
+    return raw if raw.is_a?(Array)
+
+    parsed = JSON.parse(raw)
+    parsed.is_a?(Array) ? parsed : []
+  rescue JSON::ParserError
+    []
+  end
+
+  # Busca email/telefone direto do banco a partir dos ids escolhidos na UI —
+  # o front nunca precisa (re)enviar o email/telefone em claro, só os ids
+  # dos contatos já visíveis pra ele.
+  def contacts_from_ids(ids)
+    return [] if ids.blank?
+
+    Contact.where(id: Array(ids)).pluck(:email, :phone_number).map do |email, phone|
+      { email: email, phone: phone }
+    end
   end
 end
