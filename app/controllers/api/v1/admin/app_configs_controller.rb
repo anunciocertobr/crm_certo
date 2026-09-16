@@ -82,11 +82,15 @@ module Api
           # Organização > Imobiliária — sem inbox: o contato de cada imóvel é um
           # link wa.me aberto no navegador do visitante, não um pedido roteado
           # por um canal integrado (ao contrário do cardápio digital acima).
+          # REAL_ESTATE_AGENTS guarda um array JSON-stringificado de corretores
+          # (nome, identificação/CRECI, horário, telefone, email, status) — mesmo
+          # padrão de ORG_UNIDADES_JSON/ORG_COLORS_JSON abaixo: opaco pro backend,
+          # parseado no frontend (ver RealEstateAgentsDialog.tsx).
           'real_estate' => %w[
             REAL_ESTATE_COMPANY_NAME REAL_ESTATE_HEADER_COLOR REAL_ESTATE_BACKGROUND_COLOR
             REAL_ESTATE_FOOTER_COLOR REAL_ESTATE_ICON_COLOR REAL_ESTATE_TEXT_COLOR
             REAL_ESTATE_TITLE_COLOR REAL_ESTATE_COMPANY_NAME_COLOR REAL_ESTATE_GTM_ID
-            REAL_ESTATE_WHATSAPP_NUMBER
+            REAL_ESTATE_WHATSAPP_NUMBER REAL_ESTATE_AGENTS
           ],
           # Organização > Dados da Empresa. ORG_UNIDADES_JSON/ORG_COLORS_JSON hold
           # JSON-stringified arrays (units w/ opening hours, color tokens) — stored
