@@ -113,6 +113,21 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
         audience_id: params.require(:id_publico),
         contacts: contacts_from_ids(params[:contact_ids])
       ))
+    when 'buscar_direcionamento'
+      respond(service.search_targeting(query: params.require(:q), category: params.require(:categoria)))
+    when 'sugestoes_direcionamento'
+      respond(service.targeting_suggestions(interest_names: parse_questions(params[:interesses])))
+    when 'estimar_alcance'
+      respond(service.reach_estimate(
+        ad_account_id: params.require(:id_conta_anuncio),
+        targeting: parse_json_object(params[:targeting])
+      ))
+    when 'criar_publico_salvo'
+      respond(service.create_saved_audience(
+        ad_account_id: params.require(:id_conta_anuncio),
+        name: params.require(:name),
+        targeting: parse_json_object(params[:targeting])
+      ))
     else
       error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD, "Ação desconhecida: #{params[:acao]}", status: :unprocessable_entity)
     end
@@ -156,6 +171,21 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
     parsed.is_a?(Array) ? parsed : []
   rescue JSON::ParserError
     []
+  end
+
+  # `targeting` chega do front como o objeto flexible_spec/exclusions/
+  # geo_locations/age_min/age_max/genders inteiro, em JSON — ao contrário de
+  # `edicao` (que é montado por partes e concatenado sem chaves externas),
+  # este já vem pronto pra virar Hash direto.
+  def parse_json_object(raw)
+    return {} if raw.blank?
+    return raw.to_unsafe_h if raw.is_a?(ActionController::Parameters)
+    return raw if raw.is_a?(Hash)
+
+    parsed = JSON.parse(raw)
+    parsed.is_a?(Hash) ? parsed : {}
+  rescue JSON::ParserError
+    {}
   end
 
   # Busca email/telefone direto do banco a partir dos ids escolhidos na UI —

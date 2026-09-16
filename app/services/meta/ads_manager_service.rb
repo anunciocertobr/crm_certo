@@ -622,6 +622,50 @@ class Meta::AdsManagerService
     Result.new(success: true, data: { 'uploaded' => rows.size })
   end
 
+  # --- Direcionamento Detalhado (interesses, comportamentos, dados demográficos) ---
+
+  TARGETING_CLASSES = %w[interests behaviors demographics].freeze
+
+  def search_targeting(query:, category:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+    return Result.new(success: false, error: 'Categoria de direcionamento inválida.') unless TARGETING_CLASSES.include?(category)
+
+    get('/search', type: 'adTargetingCategory', class: category, q: query, limit: 25)
+  end
+
+  # Interesses relacionados aos já escolhidos — mesmo recurso do "Sugestões"
+  # do Gerenciador de Anúncios da própria Meta.
+  def targeting_suggestions(interest_names:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+    return Result.new(success: true, data: []) if interest_names.blank?
+
+    get('/search', type: 'adinterestsuggestion', interest_list: interest_names.to_json, limit: 25)
+  end
+
+  # targeting: hash já no formato flexible_spec/exclusions/geo_locations/
+  # age_min/age_max/genders que a Graph API espera — montado no frontend a
+  # partir dos itens escolhidos (ver TargetingBuilder.tsx).
+  def reach_estimate(ad_account_id:, targeting:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    result = get("/act_#{id}/delivery_estimate", targeting_spec: targeting.to_json, optimization_goal: 'REACH')
+    return result unless result.success
+
+    Result.new(success: true, data: result.data.is_a?(Array) ? (result.data.first || {}) : result.data)
+  end
+
+  # "Saved Audience" — o direcionamento detalhado em si não é um objeto que
+  # a Graph API guarda sozinho (ao contrário de Custom Audience); pra ficar
+  # de fato salvo e reutilizável em campanhas futuras, precisa virar um
+  # Saved Audience nomeado.
+  def create_saved_audience(ad_account_id:, name:, targeting:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    post("/act_#{id}/saved_audiences", { name: name, targeting: targeting.to_json })
+  end
+
   private
 
   # Resume o `targeting` de uma lista de conjuntos de anúncio num único
