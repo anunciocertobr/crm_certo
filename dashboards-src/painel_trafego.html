@@ -685,7 +685,7 @@
                     <div>
                         <label for="edit-optimization-goal" class="block text-sm font-medium text-slate-300 mb-1">Objetivo de Otimização</label>
                         <select id="edit-optimization-goal" class="w-full bg-slate-700 text-white p-3 rounded-md border border-slate-600 focus:outline-none focus:ring-2 focus:ring-sky-500">
-                            <option value="OUTCOME_MESSAGING_CONVERSATIONS">Mensagens (WhatsApp/Messenger)</option>
+                            <option value="CONVERSATIONS">Mensagens (WhatsApp/Messenger)</option>
                             <option value="IMPRESSIONS">Impressões</option>
                             <option value="LINK_CLICKS">Cliques em Link</option>
                             <option value="REACH">Alcance</option>
@@ -2916,7 +2916,7 @@
                 const dailyBudgetReal = parseFloat(adSetItem.daily_budget || 0) / 100; editDailyBudgetInput.value = dailyBudgetReal.toFixed(2);
                 
                 // População de Estratégia e Tempo (Usando as novas funções de conversão)
-                editOptimizationGoalSelect.value = adSetItem.optimization_goal || 'OUTCOME_MESSAGING_CONVERSATIONS';
+                editOptimizationGoalSelect.value = adSetItem.optimization_goal || 'CONVERSATIONS';
                 editBidStrategySelect.value = adSetItem.bid_strategy || 'LOWEST_COST_WITHOUT_CAP';
                 editAdSetStartTimeInput.value = formatMetaDateTimeToLocal(adSetItem.start_time);
                 editAdSetEndTimeInput.value = formatMetaDateTimeToLocal(adSetItem.end_time);
@@ -3290,9 +3290,14 @@
                     attributionControl: false
                 });
                 
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
                     maxZoom: 19,
-                    attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                    // Trocado 2x: tile.openstreetmap.org direto (bloqueado com 403 por
+                    // violar a policy deles) -> CARTO (mudou a politica e agora exige
+                    // chave de API, mostrando um watermark "REQUIRED" sem uma) -> Esri
+                    // World Street Map, confirmado ao vivo (curl real) que funciona sem
+                    // chave e sem watermark pra esse volume de uso.
+                    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom, 2012'
                 }).addTo(leafletMap);
 
                 updateMapUI(defaultLat, defaultLng, defaultRadius, 10, true);
