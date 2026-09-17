@@ -373,10 +373,65 @@ class Meta::AdsManagerService
                      })
     return step_error(campaign, 'campanha') unless campaign.success
 
-    result = create_adset_and_ad(act: act, campaign_id: campaign.data['id'], campanha: campanha, lead_form_id: lead_form_id)
-    return result unless result.success
+    # `adsets` (novo): array de conjuntos, cada um com seu próprio `ads` —
+    # suporta criar uma campanha com vários conjuntos/anúncios de uma vez
+    # (pedido do usuário: duplicar Conjunto/Anúncio ao montar a campanha,
+    # cada conjunto com seu próprio mapa/localização/público no front).
+    # Sem essa chave, cai no formato antigo achatado (um conjunto + um
+    # anúncio só, campos direto em `campanha`) — mantém compatibilidade
+    # total com duplicate_adset_to_campaign, que só sabe montar esse formato.
+    adsets_specs = campanha['adsets'].presence || [campanha]
 
-    Result.new(success: true, data: [{ 'body' => result.data.first['body'].merge('campaign_id' => campaign.data['id']) }])
+    created_adsets = []
+    adsets_specs.each do |adset_spec|
+      result = create_adset_with_ads(act: act, campaign_id: campaign.data['id'], adset_spec: adset_spec, lead_form_id: lead_form_id)
+      return result unless result.success
+
+      created_adsets << result.data
+    end
+
+    Result.new(success: true, data: [{ 'body' => { 'success' => true, 'campaign_id' => campaign.data['id'], 'adsets' => created_adsets } }])
+  end
+
+  # Cria um conjunto de anúncios + todos os seus anúncios (1 ou mais) dentro
+  # de uma campanha já criada — usado pelo caminho novo (múltiplos
+  # conjuntos) de create_campaign_full. `adset_spec['ads']` ausente (formato
+  # antigo achatado) é tratado como se fosse um `ads` de um item só, com os
+  # campos do anúncio no próprio `adset_spec`.
+  def create_adset_with_ads(act:, campaign_id:, adset_spec:, lead_form_id:)
+    targeting = resolve_targeting(act: act, targeting: adset_spec['targeting'] || {})
+    return step_error(targeting, 'direcionamento (público/interesses)') unless targeting.success
+
+    promoted_object = promoted_object_for(act: act, campanha: adset_spec)
+    return step_error(promoted_object, 'objeto promovido (pixel/página)') unless promoted_object.success
+
+    adset = post("/#{act}/adsets", {
+                    name: adset_spec['adset_name'],
+                    status: adset_spec['adset_status'].presence || 'PAUSED',
+                    campaign_id: campaign_id,
+                    daily_budget: adset_spec['daily_budget'],
+                    optimization_goal: adset_spec['optimization_goal'],
+                    bid_strategy: adset_spec['bid_strategy'],
+                    billing_event: 'IMPRESSIONS',
+                    destination_type: destination_type_for(adset_spec),
+                    promoted_object: promoted_object.data&.to_json,
+                    targeting: targeting.data.to_json
+                  }.compact)
+    return step_error(adset, 'conjunto de anúncios') unless adset.success
+
+    ads_specs = adset_spec['ads'].presence || [adset_spec]
+    created_ads = []
+    ads_specs.each do |ad_spec|
+      creative = build_creative(act: act, campanha: ad_spec, lead_form_id: lead_form_id)
+      return step_error(creative, 'criativo') unless creative.success
+
+      ad = create_ad_only(act: act, adset_id: adset.data['id'], creative_id: creative.data['id'], campanha: ad_spec)
+      return ad unless ad.success
+
+      created_ads << ad.data.first['body']
+    end
+
+    Result.new(success: true, data: { 'adset_id' => adset.data['id'], 'ads' => created_ads })
   end
 
   # Duplica um CONJUNTO DE ANÚNCIOS (com seu primeiro anúncio) pra dentro de
