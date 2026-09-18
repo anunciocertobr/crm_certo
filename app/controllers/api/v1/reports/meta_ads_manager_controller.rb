@@ -98,6 +98,8 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
       respond(service.custom_audiences(ad_account_id: params.require(:id_conta_anuncio)))
     when 'listar_pixels'
       respond(service.pixels(ad_account_id: params.require(:id_conta_anuncio)))
+    when 'detalhe_publico'
+      respond(service.audience_detail(audience_id: params.require(:id_publico)))
     when 'criar_publico_site'
       respond(service.create_website_audience(
         ad_account_id: params.require(:id_conta_anuncio),
@@ -140,6 +142,16 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
         ad_account_id: params.require(:id_conta_anuncio),
         name: params.require(:name),
         targeting: parse_json_object(params[:targeting])
+      ))
+    when 'listar_publicos_salvos'
+      respond(service.saved_audiences(ad_account_id: params.require(:id_conta_anuncio)))
+    when 'duplicar_publico_salvo'
+      overrides = params[:overrides].is_a?(ActionController::Parameters) ? params[:overrides].to_unsafe_h.symbolize_keys : {}
+      overrides[:targeting] = parse_json_object(overrides[:targeting]) if overrides[:targeting].present?
+      respond(service.duplicate_saved_audience(
+        source_audience_id: params.require(:id_publico_salvo),
+        target_ad_account_id: params.require(:id_conta_destino),
+        overrides: overrides
       ))
     # --- Listas de direcionamento (locais, não são objeto da Graph API) ---
     when 'listar_listas_direcionamento'

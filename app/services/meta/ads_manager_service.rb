@@ -709,6 +709,18 @@ class Meta::AdsManagerService
     get("/act_#{id}/adspixels", fields: 'id,name')
   end
 
+  # Usado só pelo fluxo de "Duplicar público pra outra conta" — o `rule`
+  # (URL contém) de um público de site é um JSON aninhado bem específico da
+  # Graph API; em vez de tentar reconstruí-lo perfeitamente, o duplicar só
+  # reaproveita nome/descrição/retention_days/lookalike_spec e deixa o
+  # usuário escolher de novo o pixel/público de origem (que são da CONTA
+  # DE DESTINO, nunca os mesmos IDs da conta de origem).
+  def audience_detail(audience_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    get("/#{audience_id}", fields: 'id,name,subtype,description,retention_days,lookalike_spec')
+  end
+
   # retention_days: janela de quem entra no público (1-180, limite da própria
   # Graph API). Sem url_contains, usa todo mundo que visitou o site
   # (PageView) em vez de uma página específica.
@@ -856,6 +868,33 @@ class Meta::AdsManagerService
 
     id = ad_account_id.to_s.delete_prefix('act_')
     post("/act_#{id}/saved_audiences", { name: name, targeting: targeting.to_json })
+  end
+
+  # Lista os públicos salvos (direcionamento completo — geo/idade/gênero/
+  # interesses) já criados nesta conta, pra exibir e permitir duplicar pra
+  # outra conta (ver duplicate_saved_audience).
+  def saved_audiences(ad_account_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    get("/act_#{id}/saved_audiences", fields: 'id,name,description,targeting,approximate_count', limit: 200)
+  end
+
+  # Recria, do zero, um público salvo de uma conta em OUTRA conta — a Graph
+  # API não tem um endpoint de "copiar" público salvo entre contas (só
+  # dentro da mesma conta via /copies), então lê a definição completa da
+  # origem e reenvia como criação nova no destino.
+  def duplicate_saved_audience(source_audience_id:, target_ad_account_id:, overrides: {})
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    source = get("/#{source_audience_id}", fields: 'name,targeting')
+    return step_error(source, 'público salvo de origem') unless source.success
+
+    create_saved_audience(
+      ad_account_id: target_ad_account_id,
+      name: overrides[:name].presence || "#{source.data['name']} - Cópia",
+      targeting: overrides[:targeting].presence || source.data['targeting']
+    )
   end
 
   private
