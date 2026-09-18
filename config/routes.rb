@@ -72,6 +72,7 @@ Rails.application.routes.draw do
       end
       namespace :marketing do
         resources :client_goals
+        resources :google_ads_assets, only: %i[index create update destroy]
         resources :alerts, only: [:index] do
           member do
             patch :mark_read
