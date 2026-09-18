@@ -3667,8 +3667,12 @@
             };
 
             const addAnuncioBlock = (conjuntoIdx, containerEl) => {
-                anuncioCounterByConjunto[conjuntoIdx] = (anuncioCounterByConjunto[conjuntoIdx] || 1) + 1;
-                const adIdx = anuncioCounterByConjunto[conjuntoIdx];
+                // NÃO usar `|| 1` aqui — 0 é um valor legítimo (conjunto recém
+                // criado, ainda sem nenhum anúncio) e `0 || 1` vira 1, fazendo o
+                // primeiro anúncio nascer numerado "2" em vez de "1".
+                const current = anuncioCounterByConjunto[conjuntoIdx];
+                const adIdx = (current === undefined ? 0 : current) + 1;
+                anuncioCounterByConjunto[conjuntoIdx] = adIdx;
                 const wrapper = document.createElement('div');
                 wrapper.innerHTML = anuncioTemplateHTML(conjuntoIdx, adIdx).trim();
                 const block = wrapper.firstElementChild;
@@ -3689,8 +3693,15 @@
                 wrapper.innerHTML = conjuntoTemplateHTML(idx).trim();
                 const section = wrapper.firstElementChild;
 
-                const existingConjuntos = document.querySelectorAll('.conjunto-block');
-                existingConjuntos[existingConjuntos.length - 1].after(section);
+                // Insere depois do ÚLTIMO elemento de nível "topo" (Conjunto ou
+                // Anúncio do Conjunto 1, que é um <section> irmão separado, não
+                // aninhado) — nunca depois só do último .conjunto-block, senão
+                // um Conjunto novo nasce ENTRE o Conjunto 1 e o Anúncio 1 dele
+                // (que é irmão de Conjunto 1, não filho), invertendo a ordem
+                // visual de leitura.
+                const topLevelFlow = Array.from(document.querySelectorAll('.conjunto-block, .anuncio-block'))
+                    .filter(el => !el.parentElement.classList.contains('ads-container'));
+                topLevelFlow[topLevelFlow.length - 1].after(section);
 
                 // Nav lateral
                 const navBtn = document.createElement('div');
