@@ -70,8 +70,16 @@ class Ifood::Client
     post("/order/v1.0/orders/#{ifood_order_id}/dispatch", nil)
   end
 
-  def request_cancellation(ifood_order_id, reason:, cancellation_code: '501')
+  def request_cancellation(ifood_order_id, reason:, cancellation_code:)
     post("/order/v1.0/orders/#{ifood_order_id}/requestCancellation", { reason: reason, cancellationCode: cancellation_code })
+  end
+
+  # Motivos de cancelamento válidos PRA ESTE PEDIDO especificamente (mudam
+  # conforme o status atual dele) — exigido pela homologação do iFood: não dá
+  # pra mandar um código fixo, tem que buscar aqui e deixar quem opera
+  # escolher. Formato de retorno: [{ cancelCodeId, description }, ...].
+  def cancellation_reasons(ifood_order_id)
+    get("/order/v1.0/orders/#{ifood_order_id}/cancellationReasons") || []
   end
 
   # Shipping — chama um entregador parceiro do iFood para um pedido já

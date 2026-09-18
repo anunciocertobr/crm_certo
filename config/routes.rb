@@ -88,6 +88,7 @@ Rails.application.routes.draw do
         post '/orders/:id/start_preparation', to: 'ifood#start_preparation'
         post '/orders/:id/ready_to_pickup', to: 'ifood#ready_to_pickup'
         post '/orders/:id/dispatch', to: 'ifood#dispatch_order'
+        get '/orders/:id/cancellation_reasons', to: 'ifood#cancellation_reasons'
         post '/orders/:id/cancel', to: 'ifood#cancel'
         post '/orders/:id/request_driver', to: 'ifood#request_driver'
         post '/orders/:id/cancel_request_driver', to: 'ifood#cancel_request_driver'

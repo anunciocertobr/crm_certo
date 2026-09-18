@@ -1,7 +1,7 @@
 module Api
   module V1
     class IfoodController < Api::V1::BaseController
-      before_action :fetch_order, only: %i[confirm start_preparation ready_to_pickup dispatch_order cancel request_driver cancel_request_driver delivery_quote_for_order]
+      before_action :fetch_order, only: %i[confirm start_preparation ready_to_pickup dispatch_order cancel cancellation_reasons request_driver cancel_request_driver delivery_quote_for_order]
 
       # Status da conexão: credenciais configuradas + dados da loja vinculada
       # no iFood (nome, aberta/fechada).
@@ -78,9 +78,21 @@ module Api
         perform_order_action(new_status: 'DISPATCHED') { |client| client.dispatch_order(@order.ifood_order_id) }
       end
 
+      # Homologação do iFood exige buscar os motivos válidos PRA ESTE PEDIDO
+      # (mudam conforme o status atual dele) e deixar quem opera escolher —
+      # nunca mandar um código fixo. Ver Ifood::Client#cancellation_reasons.
+      def cancellation_reasons
+        render json: { success: true, data: Ifood::Client.new.cancellation_reasons(@order.ifood_order_id) }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
       def cancel
-        reason = params[:reason].presence || 'Cancelado pela loja'
-        perform_order_action(new_status: 'CANCELLED') { |client| client.request_cancellation(@order.ifood_order_id, reason: reason) }
+        cancellation_code = params.require(:cancellation_code)
+        reason = params.require(:reason)
+        perform_order_action(new_status: 'CANCELLED') do |client|
+          client.request_cancellation(@order.ifood_order_id, reason: reason, cancellation_code: cancellation_code)
+        end
       end
 
       # Shipping — chama entregador parceiro pra este pedido (precisa do
