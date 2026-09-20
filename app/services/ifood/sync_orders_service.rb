@@ -31,6 +31,13 @@ class Ifood::SyncOrdersService
     order.save!
   rescue Ifood::Client::Error => e
     Rails.logger.error("iFood sync_order(#{ifood_order_id}) failed: #{e.message}")
+  rescue StandardError => e
+    # Um payload inesperado (ex.: campo com formato diferente do documentado)
+    # não pode derrubar o #call inteiro — isso pararia de confirmar (acknowledge)
+    # até os eventos de OUTROS pedidos que processaram bem, e o polling roda a
+    # cada minuto via Ifood::PollEventsJob: um erro silencioso aqui vira uma
+    # falha recorrente que o iFood pode interpretar como loja desconectada.
+    Rails.logger.error("iFood sync_order(#{ifood_order_id}) unexpected error: #{e.class} #{e.message}")
   end
 
   def attributes_from(payload)
@@ -50,11 +57,18 @@ class Ifood::SyncOrdersService
     }
   end
 
+  # unitPrice vem ora como número direto (ex.: pedidos de teste/homologação),
+  # ora como objeto {value, currency} (documentado) — trata os dois formatos
+  # sem quebrar (Float#dig não existe, então chamar .dig direto derrubava o
+  # sync inteiro sempre que um pedido vinha no formato numérico).
   def item_attrs(item)
+    unit_price = item['unitPrice']
+    unit_price = unit_price['value'] if unit_price.is_a?(Hash)
+
     {
       'name' => item['name'],
       'quantity' => item['quantity'],
-      'unitPrice' => item.dig('unitPrice', 'value') || item['unitPrice']
+      'unitPrice' => unit_price
     }
   end
 end
