@@ -27,7 +27,7 @@ class Ifood::SyncOrdersService
     return if payload.blank?
 
     order = IfoodOrder.find_or_initialize_by(ifood_order_id: ifood_order_id)
-    order.assign_attributes(attributes_from(payload))
+    order.assign_attributes(attributes_from(order, payload))
     order.save!
   rescue Ifood::Client::Error => e
     Rails.logger.error("iFood sync_order(#{ifood_order_id}) failed: #{e.message}")
@@ -40,21 +40,28 @@ class Ifood::SyncOrdersService
     Rails.logger.error("iFood sync_order(#{ifood_order_id}) unexpected error: #{e.class} #{e.message}")
   end
 
-  def attributes_from(payload)
+  # GET order_details às vezes devolve um payload degradado (ex.: pedido de
+  # teste já cancelado/concluído), quase só com "id" e nada mais — um GET
+  # tardio desses não pode apagar dado real já salvo nem reverter uma ação
+  # que a gente acabou de confirmar com o iFood (ex.: cancelar). Por isso só
+  # grava cada campo quando o payload realmente traz um valor pra ele;
+  # campo ausente = mantém o que já está salvo, não vira nil/0/'PLACED'.
+  def attributes_from(order, payload)
     customer = payload['customer'] || {}
-    total = payload.dig('total', 'orderAmount') || payload.dig('total', 'value') || 0
+    total = payload.dig('total', 'orderAmount') || payload.dig('total', 'value')
+    incoming_status = payload['orderStatus'] || payload['status']
 
-    {
-      display_id: payload['displayId'],
-      status: payload['orderStatus'] || payload['status'] || 'PLACED',
-      order_type: payload['orderType'],
-      customer_name: customer['name'],
-      customer_phone: customer.dig('phone', 'number'),
-      items: (payload['items'] || []).map { |i| item_attrs(i) },
-      total_price: total.to_f,
-      placed_at: payload['createdAt'] || Time.current,
-      raw_payload: payload
-    }
+    attrs = { raw_payload: payload }
+    attrs[:display_id] = payload['displayId'] if payload['displayId'].present?
+    attrs[:order_type] = payload['orderType'] if payload['orderType'].present?
+    attrs[:customer_name] = customer['name'] if customer['name'].present?
+    attrs[:customer_phone] = customer.dig('phone', 'number') if customer.dig('phone', 'number').present?
+    attrs[:items] = payload['items'].map { |i| item_attrs(i) } if payload['items'].present?
+    attrs[:total_price] = total.to_f if total.present?
+    attrs[:placed_at] = payload['createdAt'] if payload['createdAt'].present?
+    attrs[:status] = incoming_status if incoming_status.present?
+    attrs[:status] = 'PLACED' if order.new_record? && attrs[:status].blank?
+    attrs
   end
 
   # unitPrice vem ora como número direto (ex.: pedidos de teste/homologação),
