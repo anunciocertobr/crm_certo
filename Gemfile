@@ -128,6 +128,10 @@ gem 'web-push', '>= 3.0.1'
 ##-- HTTP client for external services --##
 gem 'httparty'
 
+##-- SOAP + assinatura XML para webservices municipais de NFS-e --##
+gem 'savon'
+gem 'xmldsig'
+
 ##-- geocoding / parse location from ip --##
 # http://www.rubygeocoder.com/
 gem 'geocoder'

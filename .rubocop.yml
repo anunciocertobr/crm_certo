@@ -27,10 +27,13 @@ Metrics/ClassLength:
     - 'app/jobs/webhooks/whatsapp_events_job.rb'
     - 'app/jobs/whatsapp_sync_initiator_job.rb'
     - 'app/services/whatsapp/conversation_sync_service.rb'
+    - 'app/services/guarulhos/client.rb'
 
 Metrics/MethodLength:
   Max: 19
   Exclude:
+    - 'app/services/guarulhos/client.rb'
+    - 'db/migrate/20260921150100_create_service_invoices.rb'
     - 'app/jobs/agent_bots/debounce_processor_job.rb'
     - 'app/jobs/agent_bots/delayed_message_job.rb'
     - 'app/services/agent_bots/debounce_service.rb'
@@ -104,6 +107,7 @@ Metrics/BlockLength:
     - db/schema.rb
     - 'app/services/agent_bots/text_segmentation_service.rb'
     - 'app/services/whatsapp/template_processing_service.rb'
+    - 'app/services/guarulhos/client.rb'
 
 Metrics/ModuleLength:
   Exclude:
@@ -209,6 +213,8 @@ Metrics/AbcSize:
     - 'app/jobs/whatsapp_sync_initiator_job.rb'
     - 'app/services/whatsapp/conversation_sync_service.rb'
     - 'app/services/whatsapp/embedded_signup_service.rb'
+    - 'app/services/guarulhos/client.rb'
+    - 'db/migrate/20260921150100_create_service_invoices.rb'
 
 Metrics/CyclomaticComplexity:
   Max: 7

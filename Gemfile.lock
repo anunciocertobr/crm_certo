@@ -106,6 +106,10 @@ GEM
       zeitwerk (>= 2.4, < 3.0)
     addressable (2.8.7)
       public_suffix (>= 2.0.2, < 7.0)
+    akami (1.4.0)
+      base64
+      gyoku (>= 0.4.0)
+      nokogiri
     annotate (3.2.0)
       activerecord (>= 3.2, < 8.0)
       rake (>= 10.4, < 14.0)
@@ -300,6 +304,9 @@ GEM
       signet (>= 0.16, < 2.a)
     groupdate (6.2.1)
       activesupport (>= 5.2)
+    gyoku (1.4.0)
+      builder (>= 2.1.2)
+      rexml (~> 3.0)
     haikunator (1.1.1)
     hairtrigger (1.0.0)
       activerecord (>= 6.0, < 8)
@@ -324,6 +331,11 @@ GEM
       mini_mime (>= 1.0.0)
       multi_xml (>= 0.5.2)
     httpclient (2.8.3)
+    httpi (4.0.4)
+      base64
+      mutex_m
+      nkf
+      rack (>= 2.0, < 4)
     i18n (1.14.7)
       concurrent-ruby (~> 1.0)
     image_processing (1.12.2)
@@ -442,6 +454,7 @@ GEM
     newrelic_rpm (9.6.0)
       base64
     nio4r (2.7.3)
+    nkf (0.3.0)
     nokogiri (1.18.8)
       mini_portile2 (~> 2.8.2)
       racc (~> 1.4)
@@ -451,6 +464,9 @@ GEM
       racc (~> 1.4)
     nokogiri (1.18.8-x86_64-linux-gnu)
       racc (~> 1.4)
+    nori (2.9.1)
+      bigdecimal
+      stringio
     oauth (1.1.0)
       oauth-tty (~> 1.0, >= 1.0.1)
       snaky_hash (~> 2.0)
@@ -837,6 +853,15 @@ GEM
     sass-listen (4.0.0)
       rb-fsevent (~> 0.9, >= 0.9.4)
       rb-inotify (~> 0.9, >= 0.9.7)
+    savon (2.17.5)
+      akami (~> 1.2)
+      builder (>= 2.1.2)
+      gyoku (~> 1.2)
+      httpi (>= 4, < 5)
+      mail (~> 2.5)
+      nokogiri (>= 1.8.1)
+      nori (~> 2.7)
+      wasabi (>= 5.1.0, < 6)
     scout_apm (5.3.3)
       parser
     scss_lint (0.60.0)
@@ -908,6 +933,7 @@ GEM
     squasher (0.7.2)
     stackprof (0.2.25)
     statsd-ruby (1.5.0)
+    stringio (3.2.0)
     telephone_number (1.4.20)
     test-prof (1.2.1)
     thor (1.3.1)
@@ -941,6 +967,10 @@ GEM
       activemodel (>= 3.2)
       mail (~> 2.5)
     version_gem (1.1.4)
+    wasabi (5.2.0)
+      addressable
+      faraday (>= 1.9, < 3)
+      nokogiri (>= 1.13.9)
     web-console (4.2.1)
       actionview (>= 6.0.0)
       activemodel (>= 6.0.0)
@@ -961,6 +991,8 @@ GEM
     working_hours (1.4.1)
       activesupport (>= 3.2)
       tzinfo
+    xmldsig (0.7.0)
+      nokogiri (>= 1.6.8, < 2.0.0)
     zeitwerk (2.6.17)
 
 PLATFORMS
@@ -1077,6 +1109,7 @@ DEPENDENCIES
   rubocop-rails
   rubocop-rspec
   rubyzip (~> 2.3)
+  savon
   scout_apm
   scss_lint
   seed_dump
@@ -1106,6 +1139,7 @@ DEPENDENCIES
   webmock
   wisper (= 2.0.0)
   working_hours
+  xmldsig
 
 RUBY VERSION
    ruby 3.4.4p34
