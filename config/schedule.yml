@@ -126,6 +126,12 @@ ifood_poll_events_job:
   queue: scheduled_jobs
   description: 'Keep the iFood integration connected by polling order events regularly'
 
+service_invoices_poll_status_job:
+  cron: '*/5 * * * *'
+  class: 'ServiceInvoices::PollStatusJob'
+  queue: scheduled_jobs
+  description: 'Consulta situação de NFS-e em processamento nos webservices municipais'
+
 # executed daily at 0500 UTC (0200 no horário de Brasília) — calcula o
 # gasto/resultado real de ontem por cliente/objetivo (Marketing > Metas de
 # Clientes) contra a margem de custo aceita, pra alimentar o aviso de
