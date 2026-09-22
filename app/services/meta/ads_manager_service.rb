@@ -198,7 +198,7 @@ class Meta::AdsManagerService
       "/act_#{ad_account_id}/campaigns",
       fields: 'id,name,status,objective,' \
               'adsets{name,status,daily_budget,targeting,promoted_object,start_time,end_time,' \
-              'optimization_goal,bid_strategy,ads{name,status,adcreative{name,body,image_url,video_id}}}',
+              'optimization_goal,bid_strategy,ads{name,status,adcreative{name,body,title,image_url,video_id}}}',
       limit: 200
     )
     return structural unless structural.success
@@ -237,7 +237,23 @@ class Meta::AdsManagerService
 
   # nivel: 'campaign' | 'adset' | 'ad'. edicao: hash já filtrado por
   # EDITABLE_FIELDS pelo controller antes de chegar aqui.
+  #
+  # `ad_creative` (só existe no nível 'ad') não é um PATCH simples como os
+  # outros campos — criativos são imutáveis na Graph API, precisa do fluxo
+  # de duas etapas em `update_ad_creative`. Extraído aqui antes do POST
+  # genérico pra não tentar mandar um objeto aninhado por `set_form_data`
+  # (que só aceita valores escalares).
   def update(id:, edicao:)
+    edicao = edicao.dup
+    raw_creative = edicao.delete('ad_creative')
+    if raw_creative.present?
+      creative_edit = raw_creative.is_a?(String) ? JSON.parse(raw_creative) : raw_creative
+      creative_result = update_ad_creative(ad_id: id, creative_edit: creative_edit)
+      return creative_result unless creative_result.success
+    end
+
+    return Result.new(success: true, data: [{ 'body' => { 'success' => true } }]) if edicao.blank?
+
     result = post("/#{id}", edicao)
     Result.new(success: result.success, data: [{ 'body' => { 'success' => result.success } }], error: result.error)
   end
@@ -1043,6 +1059,53 @@ class Meta::AdsManagerService
     return ad unless ad.success
 
     Result.new(success: true, data: [{ 'body' => ad.data.first['body'].merge('adset_id' => adset.data['id']) }])
+  end
+
+  # Editar o criativo de um anúncio já publicado: lê o `object_story_spec`
+  # atual (preserva page_id/link/call_to_action — não os re-deriva do
+  # objetivo como `build_creative`, porque aqui o objetivo já existe e não
+  # muda, só o texto/título/imagem que o modal de edição expõe), troca só
+  # o que veio preenchido, sobe a imagem nova se houver, cria um AdCreative
+  # NOVO com o spec resultante e aponta o anúncio pra ele — nunca dá pra
+  # editar um creative_id existente em cima, a Graph API não permite.
+  def update_ad_creative(ad_id:, creative_edit:)
+    ad = get("/#{ad_id}", fields: 'account_id,creative{object_story_spec}')
+    return step_error(ad, 'anúncio (dados do criativo atual)') unless ad.success
+
+    spec = ad.data.dig('creative', 'object_story_spec')
+    return Result.new(success: false, error: 'Este anúncio não tem um criativo editável (spec ausente).') if spec.blank?
+
+    spec = spec.deep_dup
+    is_video = spec['video_data'].present?
+    target = spec['video_data'] || spec['link_data']
+    return Result.new(success: false, error: 'Formato de criativo não suportado pra edição.') if target.blank?
+
+    # `link_data` usa a chave `name` pro título (ver `build_creative` acima);
+    # só `video_data` usa `title` de verdade. Escrever `title` em `link_data`
+    # deixaria o `name` antigo intocado e criaria uma chave nova sem efeito.
+    title_key = is_video ? 'title' : 'name'
+    target['message'] = creative_edit['body'] if creative_edit['body'].present?
+    target[title_key] = creative_edit['title'] if creative_edit['title'].present?
+
+    act = "act_#{ad.data['account_id']}"
+    if creative_edit['asset_base64'].present?
+      return Result.new(success: false, error: 'Trocar o vídeo de um anúncio existente não é suportado — só imagem.') if is_video
+
+      base64 = creative_edit['asset_base64'].to_s.sub(/\Adata:[^;]+;base64,/, '')
+      image = post("/#{act}/adimages", { bytes: base64 })
+      return image unless image.success
+
+      image_hash = image.data['images']&.values&.first&.dig('hash')
+      return Result.new(success: false, error: 'Upload da nova imagem não retornou hash.') if image_hash.blank?
+
+      target['image_hash'] = image_hash
+    end
+
+    creative = post("/#{act}/adcreatives", { object_story_spec: spec.to_json })
+    return step_error(creative, 'criativo (novo, com as alterações)') unless creative.success
+
+    updated = post("/#{ad_id}", { creative: { creative_id: creative.data['id'] }.to_json })
+    Result.new(success: updated.success, data: [{ 'body' => { 'success' => updated.success } }], error: updated.error)
   end
 
   def create_ad_only(act:, adset_id:, creative_id:, campanha:)
