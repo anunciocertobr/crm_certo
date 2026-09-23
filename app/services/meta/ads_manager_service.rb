@@ -238,13 +238,21 @@ class Meta::AdsManagerService
       video = video_result.success ? video_result.data : {}
     end
 
-    child_attachments = creative.dig('object_story_spec', 'link_data', 'child_attachments')
+    link_data = creative.dig('object_story_spec', 'link_data') || {}
+    child_attachments = link_data['child_attachments']
     carousel = Array(child_attachments).map do |item|
       { 'imagem' => item['picture'] || item['image_url'], 'nome' => item['name'], 'descricao' => item['description'] }
     end
 
+    # Anúncios de geração de cadastro (e alguns outros formatos) não
+    # populam o campo achatado image_url do creative — só existe dentro de
+    # object_story_spec.link_data.picture. Sem esse fallback, esses
+    # anúncios sempre voltavam "Nenhum criativo encontrado" mesmo tendo
+    # imagem de verdade.
+    imagem = creative['image_url'] || link_data['picture']
+
     Result.new(success: true, data: [{
-      'imagem' => creative['image_url'],
+      'imagem' => imagem,
       'video' => video['source'],
       'thumbnail_url' => creative['thumbnail_url'] || video['permalink_url'],
       'carrossel' => carousel,
