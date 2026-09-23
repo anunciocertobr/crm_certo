@@ -234,11 +234,12 @@ class Meta::AdsManagerService
     creative = ad.data['creative'] || {}
     video = {}
     if creative['video_id'].present?
-      video_result = get("/#{creative['video_id']}", fields: 'permalink_url,source')
+      video_result = get("/#{creative['video_id']}", fields: 'permalink_url,source,picture')
       video = video_result.success ? video_result.data : {}
     end
 
     link_data = creative.dig('object_story_spec', 'link_data') || {}
+    video_data = creative.dig('object_story_spec', 'video_data') || {}
     child_attachments = link_data['child_attachments']
     carousel = Array(child_attachments).map do |item|
       { 'imagem' => item['picture'] || item['image_url'], 'nome' => item['name'], 'descricao' => item['description'] }
@@ -251,10 +252,19 @@ class Meta::AdsManagerService
     # imagem de verdade.
     imagem = creative['image_url'] || link_data['picture']
 
+    # `source` (o .mp4 baixável) exige permissão de vídeo que este token não
+    # tem — a Graph API simplesmente omite o campo, sem erro. `permalink_url`
+    # sempre existe, só que vem RELATIVO ("/<page-id>/videos/<video-id>"),
+    # precisa do domínio na frente pra virar um link de verdade. Sem isso, um
+    # anúncio em vídeo (bem comum) sempre caía em "Nenhum criativo
+    # encontrado" mesmo tendo vídeo de verdade.
+    video_url = video['source'] || (video['permalink_url'].present? ? "https://www.facebook.com#{video['permalink_url']}" : nil)
+    thumbnail = creative['thumbnail_url'] || video_data['image_url'] || video['picture']
+
     Result.new(success: true, data: [{
       'imagem' => imagem,
-      'video' => video['source'],
-      'thumbnail_url' => creative['thumbnail_url'] || video['permalink_url'],
+      'video' => video_url,
+      'thumbnail_url' => thumbnail,
       'carrossel' => carousel,
       'titulo' => creative['title'],
       'texto_principal' => creative['body'],
