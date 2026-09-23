@@ -215,10 +215,20 @@ class Meta::AdsManagerService
     Result.new(success: true, data: [{ 'dados campanhas' => { 'data' => structural.data }, 'insights' => { 'data' => insights.data } }])
   end
 
+  # Suporta os 3 formatos de criativo que a Meta Ads tem: imagem única,
+  # vídeo único (Reel/Story) e carrossel (child_attachments dentro de
+  # object_story_spec.link_data — cada cartão com sua própria imagem/nome/
+  # descrição). `titulo`/`texto_principal`/`creativo_nome` sempre vieram do
+  # `name`/`body`/`title` achatados do próprio nó creative (mesma leitura
+  # que `duplicate_adset_to_campaign` já faz pra duplicar) — faltavam nesta
+  # resposta desde sempre, então o front nunca tinha como mostrá-los.
   def creative_details(ad_id:)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
 
-    ad = get("/#{ad_id}", fields: 'name,creative{name,body,title,image_url,thumbnail_url,video_id}')
+    ad = get(
+      "/#{ad_id}",
+      fields: 'name,creative{name,body,title,image_url,thumbnail_url,video_id,object_story_spec}'
+    )
     return ad unless ad.success
 
     creative = ad.data['creative'] || {}
@@ -228,10 +238,19 @@ class Meta::AdsManagerService
       video = video_result.success ? video_result.data : {}
     end
 
+    child_attachments = creative.dig('object_story_spec', 'link_data', 'child_attachments')
+    carousel = Array(child_attachments).map do |item|
+      { 'imagem' => item['picture'] || item['image_url'], 'nome' => item['name'], 'descricao' => item['description'] }
+    end
+
     Result.new(success: true, data: [{
       'imagem' => creative['image_url'],
       'video' => video['source'],
-      'thumbnail_url' => creative['thumbnail_url'] || video['permalink_url']
+      'thumbnail_url' => creative['thumbnail_url'] || video['permalink_url'],
+      'carrossel' => carousel,
+      'titulo' => creative['title'],
+      'texto_principal' => creative['body'],
+      'criativo_nome' => creative['name']
     }])
   end
 
