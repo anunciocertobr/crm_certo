@@ -72,7 +72,59 @@ class Dropbox::FilesService
     handle(http.request(request))
   end
 
+  MAX_DOWNLOAD_BYTES = 40 * 1024 * 1024
+
+  # Ver Google::DriveService#download_file — mesmo contrato (base64) pra o
+  # front tratar Drive e Dropbox igual na hora de escolher um criativo.
+  def download_file(path:)
+    token = access_token
+    return Result.new(success: false, error: not_connected_message) unless token
+
+    meta = post('/files/get_metadata', token, { path: normalize_path(path) })
+    return meta unless meta.success
+
+    size = meta.data['size'].to_i
+    return Result.new(success: false, error: "Arquivo grande demais (#{size / 1024 / 1024}MB) — limite de #{MAX_DOWNLOAD_BYTES / 1024 / 1024}MB.") if size > MAX_DOWNLOAD_BYTES
+
+    body = content_call('/files/download', token, { path: normalize_path(path) })
+    return Result.new(success: false, error: 'Não foi possível baixar o arquivo do Dropbox.') unless body
+
+    name = meta.data['name']
+    Result.new(success: true, data: { name: name, mimetype: mimetype_for(name), size: body.bytesize,
+                                      base64: Base64.strict_encode64(body) })
+  end
+
+  def thumbnail(path:)
+    token = access_token
+    return Result.new(success: false, error: not_connected_message) unless token
+
+    body = content_call('/files/get_thumbnail_v2', token,
+                        { resource: { '.tag' => 'path', 'path' => normalize_path(path) }, format: 'jpeg', size: 'w256h256' })
+    return Result.new(success: false, error: 'Sem miniatura.') unless body
+
+    Result.new(success: true, data: { base64: Base64.strict_encode64(body), mimetype: 'image/jpeg' })
+  end
+
   private
+
+  def content_call(path, token, arg)
+    uri = URI("#{CONTENT_URL}#{path}")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.read_timeout = 120
+    request = Net::HTTP::Post.new(uri.request_uri)
+    request['Authorization'] = "Bearer #{token}"
+    request['Dropbox-API-Arg'] = arg.to_json
+    response = http.request(request)
+    response.code.to_i.between?(200, 299) ? response.body : nil
+  rescue StandardError => e
+    Rails.logger.error "Dropbox::FilesService: content_call error: #{e.message}"
+    nil
+  end
+
+  def mimetype_for(name)
+    Marcel::MimeType.for(name: name) || 'application/octet-stream'
+  end
 
   def normalize_path(path)
     return '' if path.blank? || path == '/'

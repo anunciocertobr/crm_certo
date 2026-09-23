@@ -16,6 +16,10 @@ class Api::V1::Reports::GoogleDriveController < Api::V1::BaseController
       respond(service.create_folder(name: params.require(:name), parent_id: params[:parent_id].presence))
     when 'excluir_arquivo'
       respond(service.delete_file(file_id: params.require(:file_id)))
+    when 'baixar_arquivo'
+      respond(service.download_file(file_id: params.require(:file_id)))
+    when 'miniatura'
+      respond(service.thumbnail(file_id: params.require(:file_id)))
     when 'subir_arquivo'
       file = params.require(:file)
       respond(service.upload_file(

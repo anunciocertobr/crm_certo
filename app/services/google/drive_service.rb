@@ -91,7 +91,62 @@ class Google::DriveService
     handle(http.request(request), 'subir o arquivo pro')
   end
 
+  MAX_DOWNLOAD_BYTES = 40 * 1024 * 1024
+
+  # Baixa o conteúdo de um arquivo (imagem/vídeo) pra usar como criativo de
+  # anúncio: o front recebe em base64 e reaproveita o mesmo caminho de upload
+  # (asset_base64) do computador. Limita o tamanho porque o arquivo atravessa
+  # o servidor e depois a Graph API.
+  def download_file(file_id:)
+    token = access_token
+    return Result.new(success: false, error: not_connected_message) unless token
+
+    meta = get("/files/#{file_id}", token, { fields: 'id,name,mimeType,size' })
+    return meta unless meta.success
+
+    size = meta.data['size'].to_i
+    return Result.new(success: false, error: "Arquivo grande demais (#{size / 1024 / 1024}MB) — limite de #{MAX_DOWNLOAD_BYTES / 1024 / 1024}MB.") if size > MAX_DOWNLOAD_BYTES
+
+    body = fetch_binary("#{BASE_URL}/files/#{file_id}?alt=media", token)
+    return Result.new(success: false, error: 'Não foi possível baixar o arquivo do Google Drive.') unless body
+
+    Result.new(success: true, data: { name: meta.data['name'], mimetype: meta.data['mimeType'], size: body.bytesize,
+                                      base64: Base64.strict_encode64(body) })
+  end
+
+  # Miniatura (thumbnailLink exige autenticação em muitos casos, então busca
+  # do lado do servidor com o token e devolve embutida em base64).
+  def thumbnail(file_id:)
+    token = access_token
+    return Result.new(success: false, error: not_connected_message) unless token
+
+    meta = get("/files/#{file_id}", token, { fields: 'thumbnailLink' })
+    link = meta.success ? meta.data['thumbnailLink'] : nil
+    return Result.new(success: false, error: 'Sem miniatura.') if link.blank?
+
+    body = fetch_binary(link.sub(/=s\d+\z/, '=s320'), token)
+    return Result.new(success: false, error: 'Sem miniatura.') unless body
+
+    Result.new(success: true, data: { base64: Base64.strict_encode64(body), mimetype: 'image/jpeg' })
+  end
+
   private
+
+  def fetch_binary(url, token, limit = 3)
+    uri = URI(url)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.read_timeout = 120
+    request = Net::HTTP::Get.new(uri.request_uri)
+    request['Authorization'] = "Bearer #{token}"
+    response = http.request(request)
+    return fetch_binary(response['location'], token, limit - 1) if response.is_a?(Net::HTTPRedirection) && limit.positive?
+
+    response.code.to_i.between?(200, 299) ? response.body : nil
+  rescue StandardError => e
+    Rails.logger.error "Google::DriveService: fetch_binary error: #{e.message}"
+    nil
+  end
 
   def not_connected_message
     'Conecte (ou reconecte) o Google em Configurações > Integrações > Google Workspace — precisa aceitar o escopo de Drive.'

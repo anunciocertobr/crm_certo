@@ -18,6 +18,10 @@ class Api::V1::Reports::DropboxController < Api::V1::BaseController
       respond(service.delete(path: params.require(:path)))
     when 'link_temporario'
       respond(service.temporary_link(path: params.require(:path)))
+    when 'baixar_arquivo'
+      respond(service.download_file(path: params.require(:path)))
+    when 'miniatura'
+      respond(service.thumbnail(path: params.require(:path)))
     when 'subir_arquivo'
       file = params.require(:file)
       respond(service.upload(path: "#{params[:folder_path].presence}/#{file.original_filename}", content: file.read))
