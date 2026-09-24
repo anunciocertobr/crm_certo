@@ -957,6 +957,11 @@ Rails.application.routes.draw do
         get  'forms/:slug',             to: 'forms#show'
         post 'forms/:slug/submissions', to: 'forms#create'
 
+        # Concessão de acesso do cliente (aba "Conceder Acessos" do Setup
+        # Marketing): receptor público do token do FB.login quando o cliente
+        # abre o link copiável SEM sessão no CRM. Segredo do link = grant.
+        post 'meta_client/grants', to: 'meta_client/grants#create'
+
         # Anonymous public chat page (B14.03): resolved by slug, returns website_token.
         get 'chat_pages/:slug', to: 'chat_pages#show'
 

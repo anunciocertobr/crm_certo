@@ -54,6 +54,80 @@ class Meta::ClientAccessService
     Result.new(success: true, data: { 'url' => url })
   end
 
+  # Gera um link COPIÁVEL pra mandar ao cliente (WhatsApp/e-mail): o cliente
+  # abre O link no navegador DELE e autoriza o próprio Facebook, sem estar
+  # logado no CRM. O link carrega um segredo único (grant) mais forte que o
+  # simples acesso — quem tiver o link pode autorizar; depois de usado, o
+  # link expira (aplicar_grant apaga o grant).
+  def self.gerar_link(criado_por:, nome: nil)
+    app_id = GlobalConfigService.load('FB_APP_ID', '')
+    return Result.new(success: false, error: 'FB_APP_ID não configurado no GlobalConfig.') if app_id.blank?
+
+    frontend_url = ENV['FRONTEND_URL'].presence
+    return Result.new(success: false, error: 'FRONTEND_URL não configurado no ambiente.') if frontend_url.blank?
+
+    grant = SecureRandom.hex(16)
+    add_grant(grant, criado_por, nome)
+
+    url = "#{frontend_url.gsub(%r{/+\z}, '')}/meta-client-login" \
+          "?grant=#{grant}&app_id=#{CGI.escape(app_id)}&scope=#{CGI.escape(SCOPE)}"
+
+    Result.new(success: true, data: { 'url' => url })
+  end
+
+  # Lista os links pendentes (gerados, ainda não utilizados) pro dashboard
+  # saber o que está aguardando o cliente.
+  def self.links
+    hook = Integrations::Hook.account_hooks.find_by(app_id: HOOK_APP_ID)
+    grants = ((hook&.settings || {})['grants'] || {})
+
+    lista = grants.map do |_grant, meta|
+      { 'nome' => meta['nome'], 'criado_em' => meta['criado_em'], 'criado_por' => meta['criado_por'] }
+    end
+
+    Result.new(success: true, data: [{ 'links' => lista }])
+  end
+
+  # Endpoint PÚBLICO (sem sessão) chamado pelo popup que o cliente abriu
+  # pelo link: valida o segredo do link, troca o token curto do FB.login por
+  # long-lived, identifica o usuário e grava a conexão — com rastro de quem
+  # gerou o link (criado_por). O link expira após o primeiro uso.
+  def self.aplicar_grant(grant:, fb_user_id:, token:)
+    meta = grant_para(grant)
+    return Result.new(success: false, error: 'Link de acesso inválido ou já utilizado.') if meta.blank?
+    return Result.new(success: false, error: 'fb_user_id não informado.') if fb_user_id.blank?
+    return Result.new(success: false, error: 'access token não informado.') if token.blank?
+
+    oauth = Koala::Facebook::OAuth.new(
+      GlobalConfigService.load('FB_APP_ID', ''),
+      GlobalConfigService.load('FB_APP_SECRET', '')
+    )
+
+    long_lived = exchange_for_long_lived(oauth, token)
+    profile = Koala::Facebook::API.new(long_lived[:token]).get_object('me', fields: 'id,name')
+
+    unless profile['id'].to_s == fb_user_id.to_s
+      return Result.new(success: false, error: 'O usuário do token não corresponde ao informado pelo popup.')
+    end
+
+    store_connection(
+      fb_user_id: profile['id'],
+      nome: profile['name'],
+      token: long_lived[:token],
+      expires_at: long_lived[:expires_at],
+      conectado_por: meta['criado_por']
+    )
+    delete_grant(grant)
+
+    Result.new(success: true, data: { 'fb_user_id' => profile['id'], 'nome' => profile['name'] })
+  rescue Koala::Facebook::OAuthTokenRequestError => e
+    Rails.logger.error "Meta::ClientAccessService: OAuth falhou: #{e.message}"
+    Result.new(success: false, error: "Login do Facebook falhou: #{e.message}")
+  rescue StandardError => e
+    Rails.logger.error "Meta::ClientAccessService: aplicar_grant #{e.class} #{e.message}"
+    Result.new(success: false, error: 'Erro inesperado ao salvar o acesso do cliente.')
+  end
+
   # Chamado pelo dashboard (autenticado na API) logo depois que o popup do
   # SDK devolveu o token via postMessage. O token do FB.login é curto — troca
   # por long-lived (~60 dias via fb_exchange_token), identifica o usuário do
@@ -171,6 +245,32 @@ class Meta::ClientAccessService
     def stored_clientes
       hook = Integrations::Hook.account_hooks.find_by(app_id: HOOK_APP_ID)
       ((hook&.settings || {})['clientes'] || {})
+    end
+
+    def add_grant(grant, criado_por, nome)
+      hook = Integrations::Hook.account_hooks.find_or_initialize_by(app_id: HOOK_APP_ID)
+      grants = (hook.settings || {})['grants'] || {}
+      grants[grant] = {
+        'criado_por' => criado_por,
+        'nome' => nome.to_s.presence,
+        'criado_em' => Time.current.iso8601
+      }
+      hook.settings = (hook.settings || {}).merge('grants' => grants)
+      hook.save!
+    end
+
+    def grant_para(grant)
+      hook = Integrations::Hook.account_hooks.find_by(app_id: HOOK_APP_ID)
+      ((hook&.settings || {})['grants'] || {})[grant.to_s]
+    end
+
+    def delete_grant(grant)
+      hook = Integrations::Hook.account_hooks.find_by(app_id: HOOK_APP_ID)
+      return if hook.blank?
+
+      grants = (hook.settings || {})['grants'] || {}
+      grants.delete(grant.to_s)
+      hook.update!(settings: (hook.settings || {}).merge('grants' => grants))
     end
 
     def token_valido?(dados)
