@@ -31,9 +31,14 @@ class Meta::AdsManagerService
 
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 
-  def initialize
-    @page = Channel::FacebookPage.first
-    @token = @page&.user_access_token
+  def initialize(access_token: nil)
+    # access_token: token long-lived de um CLIENTE conectado na aba
+    # "Conceder Acessos" (Meta::ClientAccessService). Nesse modo a Página
+    # global (Channel::FacebookPage) NÃO é usada — recursos que dependem
+    # dela (criativos com página, formulários de leads) não funcionam com
+    # o token do cliente e devolvem erro honesto.
+    @page = access_token.present? ? nil : Channel::FacebookPage.first
+    @token = access_token || @page&.user_access_token
   end
 
   def connected?
@@ -1370,7 +1375,7 @@ class Meta::AdsManagerService
     return asset unless asset.success
 
     base64, mimetype = asset.data
-    page_id = @page.page_id
+    page_id = @page&.page_id
     # Precisa bater com o `destination_type` do adset (ver create_campaign_full)
     # — MESSAGE_PAGE sem isso, ou com um app_destination diferente do adset,
     # é a causa exata do "Incompatibilidade entre criativo e objetivo". O
@@ -1435,7 +1440,7 @@ class Meta::AdsManagerService
   # como imagem separada (mesmo endpoint `bytes` do criativo de imagem
   # única) antes de montar o `child_attachments`.
   def build_carousel_creative(act:, campanha:)
-    page_id = @page.page_id
+    page_id = @page&.page_id
     cta = messaging_flow?(campanha) ? { type: 'MESSAGE_PAGE', value: { app_destination: 'MESSENGER' } } : { type: 'LEARN_MORE' }
     default_link = campanha['link'].presence || "https://www.facebook.com/#{page_id}"
 
@@ -1490,9 +1495,9 @@ class Meta::AdsManagerService
 
   def promoted_object_for(act:, campanha:)
     if lead_flow?(campanha)
-      Result.new(success: true, data: { page_id: @page.page_id })
+      Result.new(success: true, data: { page_id: @page&.page_id })
     elsif instagram_profile_flow?(campanha)
-      Result.new(success: true, data: { page_id: @page.page_id, instagram_actor_id: @page.instagram_id })
+      Result.new(success: true, data: { page_id: @page&.page_id, instagram_actor_id: @page&.instagram_id })
     elsif conversion_flow?(campanha)
       pixel_id = campanha['pixel_id'].presence || resolve_default_pixel_id(act: act)
       return Result.new(success: false, error: 'Nenhum pixel encontrado na conta pra usar como evento de conversão.') if pixel_id.blank?
@@ -1542,14 +1547,14 @@ class Meta::AdsManagerService
     privacy_url = campanha['privacy_policy_url'].presence || 'https://www.anunciocertobr.com.br/privacidade'
 
     post(
-      "/#{@page.page_id}/leadgen_forms",
+      "/#{@page&.page_id}/leadgen_forms",
       {
         name: campanha['lead_form_name'].presence || "#{campanha['name']} - Formulário",
         questions: questions.to_json,
         privacy_policy: { url: privacy_url, link_text: 'Política de Privacidade' }.to_json,
-        follow_up_action_url: campanha['follow_up_action_url'].presence || "https://www.facebook.com/#{@page.page_id}"
+        follow_up_action_url: campanha['follow_up_action_url'].presence || "https://www.facebook.com/#{@page&.page_id}"
       },
-      @page.page_access_token
+      @page&.page_access_token
     )
   end
 

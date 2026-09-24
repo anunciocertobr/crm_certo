@@ -1,13 +1,53 @@
 # Despacha os 15 passos do "Setup de Infraestrutura Meta" (Meta::InfrastructureService)
 # por `acao`, mesmo estilo do Api::V1::Reports::MetaAdsManagerController — o
 # front manda { acao, ...campos } e recebe a resposta real da Graph API.
+#
+# Modo CLIENTE: qualquer acao pode receber `fb_user_id` (conexão criada na
+# aba "Conceder Acessos") — nesse caso TODAS as chamadas usam o token
+# long-lived do cliente (dono da BM) em vez do token global da
+# Channel::FacebookPage, e os IDs passados (business_id, ad_account_id...)
+# pertencem à BM do cliente.
 class Api::V1::Reports::MetaInfrastructureController < Api::V1::BaseController
   def handle
-    service = Meta::InfrastructureService.new
+    return error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD,
+                          'Acesso do cliente não encontrado ou expirado — refaça o login na aba "Conceder Acessos".',
+                          status: :unprocessable_entity) if params[:fb_user_id].present? && client_token.blank?
+
+    service = Meta::InfrastructureService.new(access_token: client_token)
 
     case params[:acao]
     when 'lista_bms'
-      respond(Meta::AdsManagerService.new.business_managers)
+      respond(Meta::AdsManagerService.new(access_token: client_token).business_managers)
+    when 'client_login_url'
+      respond(Meta::ClientAccessService.login_url(conectado_por: Current.user&.id))
+    when 'client_salvar_token'
+      respond(Meta::ClientAccessService.store_token(
+        fb_user_id: params.require(:fb_user_id),
+        token: params.require(:token),
+        conectado_por: Current.user&.id
+      ))
+    when 'client_conexoes'
+      respond(Meta::ClientAccessService.conexoes)
+    when 'client_desconectar'
+      respond(Meta::ClientAccessService.desconectar(params.require(:fb_user_id)))
+    when 'client_lista_paginas'
+      respond(service.list_pages(business_id: params[:business_id]))
+    when 'client_lista_instagram'
+      respond(service.list_instagram_accounts(business_id: params.require(:business_id)))
+    when 'client_lista_usuarios'
+      respond(list_client_users(service))
+    when 'client_convidar_usuario'
+      respond(invite_client_user(service))
+    when 'client_remover_usuario'
+      respond(service.remove_business_user(
+        business_id: params.require(:business_id),
+        user_id: params.require(:user_id)
+      ))
+    when 'conceder_acesso_parceiro_bm'
+      respond(service.grant_bm_partner_access(
+        business_id: params.require(:business_id),
+        partner_business_id: params.require(:partner_business_id)
+      ))
     when 'lista_contas_anuncio'
       respond(service.list_ad_accounts(business_id: params.require(:business_id)))
     when 'lista_datasets'
@@ -75,6 +115,28 @@ class Api::V1::Reports::MetaInfrastructureController < Api::V1::BaseController
   end
 
   private
+
+  # Token long-lived do CLIENTE (aba "Conceder Acessos") quando a chamada
+  # veio com fb_user_id; nil = comportamento antigo (token global da página).
+  def client_token
+    @client_token ||= Meta::ClientAccessService.token_para(params[:fb_user_id]) if params[:fb_user_id].present?
+  end
+
+  def list_client_users(service)
+    usuarios = service.list_business_users(business_id: params.require(:business_id))
+    return usuarios unless usuarios.success
+
+    pendentes = service.list_pending_users(business_id: params.require(:business_id))
+    usuarios.data[0]['convites_pendentes'] = pendentes.success ? pendentes.data[0]['convites_pendentes'] : []
+    usuarios
+  end
+
+  def invite_client_user(service)
+    role = params.require(:role)
+    return error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD, 'Role deve ser ADMIN ou EMPLOYEE.', status: :unprocessable_entity) unless %w[ADMIN EMPLOYEE].include?(role)
+
+    service.invite_business_user(business_id: params.require(:business_id), email: params.require(:email), role: role)
+  end
 
   def respond(result)
     if result.success

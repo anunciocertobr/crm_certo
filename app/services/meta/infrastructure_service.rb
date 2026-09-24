@@ -19,8 +19,12 @@ class Meta::InfrastructureService
 
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 
-  def initialize
-    @token = Channel::FacebookPage.first&.user_access_token
+  def initialize(access_token: nil)
+    # access_token: token long-lived de um CLIENTE conectado na aba "Conceder
+    # Acessos" (Meta::ClientAccessService) — quando presente, todos os passos
+    # operam na BM DO CLIENTE em vez de usar o token global da
+    # Channel::FacebookPage.
+    @token = access_token || Channel::FacebookPage.first&.user_access_token
   end
 
   def connected?
@@ -166,6 +170,79 @@ class Meta::InfrastructureService
     post("/#{page_id}/leadgen_tos", { business_id: business_id })
   end
 
+  # --- Aba "Conceder Acessos" (operando com o token do cliente) ---
+
+  # Lista as Páginas acessíveis pelo token do cliente: as da BM informada
+  # (donas + clientes) ou, sem BM, /me/accounts. Traz a conta do Instagram
+  # já vinculada a cada página (quando existir) pra UI de conexão.
+  def list_pages(business_id: nil)
+    fields = 'id,name,instagram_business_account{id,username}'
+    if business_id.present?
+      owned = get("/#{business_id}/owned_pages", fields: fields)
+      return owned unless owned.success
+
+      client = get("/#{business_id}/client_pages", fields: fields)
+      return client unless client.success
+
+      pages = ((owned.data['data'] || []) + (client.data['data'] || [])).uniq { |p| p['id'] }
+    else
+      result = get('/me/accounts', fields: fields)
+      return result unless result.success
+
+      pages = result.data['data'] || []
+    end
+
+    Result.new(success: true, data: [{ 'lista_paginas' => pages }])
+  end
+
+  # Contas profissionais do Instagram cadastradas na BM do cliente — a
+  # outra metade do par Página↔Instagram do passo "conectar Instagram".
+  def list_instagram_accounts(business_id:)
+    result = get("/#{business_id}/instagram_accounts", fields: 'id,username,name')
+    return result unless result.success
+
+    Result.new(success: true, data: [{ 'lista_instagram' => result.data['data'] || [] }])
+  end
+
+  # Gerenciar acessos: usuários do Business Manager (quem já tem acesso).
+  def list_business_users(business_id:)
+    result = get("/#{business_id}/business_users", fields: 'id,name,email')
+    return result unless result.success
+
+    Result.new(success: true, data: [{ 'usuarios_bm' => result.data['data'] || [] }])
+  end
+
+  # Gerenciar acessos: convites pendentes (email convidado, ainda sem
+  # conta criada no BM do cliente).
+  def list_pending_users(business_id:)
+    result = get("/#{business_id}/pending_users", fields: 'id,email,role')
+    return result unless result.success
+
+    Result.new(success: true, data: [{ 'convites_pendentes' => result.data['data'] || [] }])
+  end
+
+  # Gerenciar acessos: convida um usuário por email com papel
+  # (ADMIN ou EMPLOYEE) no Business Manager do cliente.
+  def invite_business_user(business_id:, email:, role:)
+    post("/#{business_id}/business_users", { email: email, role: role })
+  end
+
+  # Gerenciar acessos: remove um usuário do Business Manager do cliente.
+  def remove_business_user(business_id:, user_id:)
+    delete("/#{business_id}/business_users/#{user_id}")
+  end
+
+  # Define empresa parceira em NÍVEL DE BM: compartilha os ativos da BM do
+  # cliente com outra Business Manager (a parceira precisa aceitar o pedido
+  # nas configurações dela). Diferente do Passo 14, que compartilha UMA
+  # conta de anúncio via /agencies da conta.
+  def grant_bm_partner_access(business_id:, partner_business_id:)
+    post("/#{business_id}/agencies", {
+      partner_business_id: partner_business_id,
+      permitted_tasks: %w[MANAGE ANALYZE ADVERTISE].to_json
+    })
+  end
+
   private
 
   def get(path, params)
@@ -197,6 +274,22 @@ class Meta::InfrastructureService
   rescue StandardError => e
     Rails.logger.error "Meta::InfrastructureService: POST #{path} error: #{e.message}"
     Result.new(success: false, error: 'Erro inesperado ao gravar na Graph API da Meta.')
+  end
+
+  def delete(path)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    uri = URI("#{BASE_URL}#{path}")
+    uri.query = URI.encode_www_form({ access_token: @token })
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.read_timeout = 30
+
+    handle_response(http.request(Net::HTTP::Delete.new(uri.request_uri)), path)
+  rescue StandardError => e
+    Rails.logger.error "Meta::InfrastructureService: DELETE #{path} error: #{e.message}"
+    Result.new(success: false, error: 'Erro inesperado ao remover na Graph API da Meta.')
   end
 
   def handle_response(response, path)
