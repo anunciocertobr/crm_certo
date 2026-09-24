@@ -23,3 +23,10 @@ do `MenuConfig`.
 (sem `rails console` na mão): buscar o conteúdo atual do `MenuConfig` scope
 `editor-menus`, achar o node de id `mtlsqe9g-44xt89` na árvore de `items`, e
 copiar o campo `html` pra este arquivo.
+
+## marketing-ia/mktia-listaclientes.html
+
+"Lista de Clientes (Tráfego)" — dashboard de cadastro solto de clientes de
+tráfego, mantido pelo próprio usuário. Snapshot do HTML/JS real que está em
+produção no `MenuConfig`, guardado aqui como histórico de versão (mesma
+convenção do Painel Tráfego).

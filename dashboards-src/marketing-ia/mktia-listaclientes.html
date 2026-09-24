@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lista de Clientes (Tráfego)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body>
+
+    <div class="bg-gray-900 text-white pb-24 min-h-screen">
+        <div class="container mx-auto p-4 md:p-6 max-w-4xl">
+
+            <div class="flex justify-between items-center mb-6 border-b border-gray-700 pb-4">
+                <h1 class="text-2xl font-bold text-sky-400">
+                    <i class="fas fa-address-book mr-2"></i>Lista de Clientes (Tráfego)
+                </h1>
+                <button id="new-client-btn" class="text-sm bg-sky-600 hover:bg-sky-500 text-white font-medium py-2 px-3 rounded-lg flex items-center gap-2">
+                    <i class="fas fa-plus"></i> Novo Cliente
+                </button>
+            </div>
+
+            <p class="text-xs text-gray-500 mb-4">
+                Cadastro solto, mantido por você — não puxa dados de Contatos nem de outra tela do CRM.
+            </p>
+
+            <div id="clients-list" class="space-y-3"></div>
+            <div id="clients-empty" class="text-sm text-gray-500 py-8 text-center hidden">
+                <i class="fas fa-folder-open fa-2x mb-3 block"></i>
+                Nenhum cliente cadastrado ainda.
+            </div>
+            <div id="clients-loading" class="text-sm text-gray-500 py-8 text-center">
+                <i class="fas fa-sync fa-spin mr-2"></i>Carregando...
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: novo/editar cliente -->
+    <div id="client-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+        <div class="bg-gray-800 border border-gray-700 rounded-xl p-6 w-full max-w-md">
+            <h3 id="client-modal-title" class="text-lg font-bold text-sky-400 mb-4">Novo Cliente</h3>
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs font-medium text-gray-300 mb-1">Nome do cliente</label>
+                    <input id="client-name-input" type="text" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200" placeholder="Ex: Burger House">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-300 mb-1">Contato (pessoa)</label>
+                    <input id="client-contact-input" type="text" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200" placeholder="Ex: João da Silva">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-300 mb-1">Telefone</label>
+                        <input id="client-phone-input" type="text" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200" placeholder="(11) 99999-9999">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-300 mb-1">E-mail</label>
+                        <input id="client-email-input" type="email" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200" placeholder="cliente@email.com">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-300 mb-1">Observações</label>
+                    <textarea id="client-notes-input" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-gray-200" rows="3" placeholder="Opcional"></textarea>
+                </div>
+            </div>
+            <div class="flex justify-end gap-2 mt-6">
+                <button id="client-modal-cancel-btn" class="text-sm bg-slate-700 hover:bg-slate-600 text-gray-200 py-2 px-4 rounded-lg">Cancelar</button>
+                <button id="client-modal-save-btn" class="text-sm bg-sky-600 hover:bg-sky-500 text-white font-medium py-2 px-4 rounded-lg">Salvar</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        // Ferramenta roda num iframe sandbox sem allow-same-origin — sem cookie/
+        // sessão disponível, e uma URL relativa resolveria contra o domínio do
+        // FRONTEND, não o da API. Troca o domínio e anexa o token de acesso em
+        // toda chamada a /api/. Mesmo padrão das outras ferramentas de Marketing.
+        let DASHBOARD_API_TOKEN = null;
+        let resolveTokenReady;
+        const tokenReady = new Promise((resolve) => { resolveTokenReady = resolve; });
+        window.addEventListener('message', (event) => {
+            if (event.data && event.data.type === 'evo-user-data' && event.data.dashboardApiToken) {
+                DASHBOARD_API_TOKEN = event.data.dashboardApiToken;
+                resolveTokenReady();
+            }
+        });
+        setTimeout(resolveTokenReady, 5000);
+
+        const DASHBOARD_API_BASE = 'https://api-crmcerto.anunciocertobr.com.br';
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = async (input, init = {}) => {
+            const url = typeof input === 'string' ? input : input.url;
+            if (url && url.startsWith('/api/')) {
+                if (!DASHBOARD_API_TOKEN) await tokenReady;
+                init = { ...init, headers: { ...(init.headers || {}), api_access_token: DASHBOARD_API_TOKEN } };
+                return originalFetch(DASHBOARD_API_BASE + url, init);
+            }
+            return originalFetch(input, init);
+        };
+    })();
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const clientsList = document.getElementById('clients-list');
+        const clientsEmpty = document.getElementById('clients-empty');
+        const clientsLoading = document.getElementById('clients-loading');
+        let clients = [];
+
+        const loadClients = async () => {
+            clientsLoading.classList.remove('hidden');
+            try {
+                const res = await fetch('/api/v1/admin/traffic_clients');
+                const body = await res.json();
+                if (!body.success) throw new Error(body.message);
+                clients = body.data || [];
+                renderClients();
+            } catch (err) {
+                console.error('Erro ao carregar clientes:', err);
+            } finally {
+                clientsLoading.classList.add('hidden');
+            }
+        };
+
+        const renderClients = () => {
+            clientsList.innerHTML = '';
+            clientsEmpty.classList.toggle('hidden', clients.length > 0);
+            clients.forEach((c) => {
+                const card = document.createElement('div');
+                card.className = 'bg-gray-800 border border-gray-700 rounded-lg p-4 flex justify-between items-start';
+                card.innerHTML = `
+                    <div>
+                        <p class="font-bold text-gray-100">${c.name}</p>
+                        ${c.contact_name ? `<p class="text-sm text-gray-400 mt-0.5"><i class="fas fa-user mr-1"></i>${c.contact_name}</p>` : ''}
+                        <p class="text-xs text-gray-500 mt-1">
+                            ${c.phone ? `<i class="fas fa-phone mr-1"></i>${c.phone}` : ''}
+                            ${c.phone && c.email ? ' &middot; ' : ''}
+                            ${c.email ? `<i class="fas fa-envelope mr-1"></i>${c.email}` : ''}
+                        </p>
+                        ${c.notes ? `<p class="text-xs text-gray-500 mt-2 italic">${c.notes}</p>` : ''}
+                    </div>
+                    <div class="flex gap-3 flex-shrink-0 ml-3">
+                        <button class="client-edit-btn text-gray-500 hover:text-sky-400" data-id="${c.id}" title="Editar"><i class="fas fa-pen text-sm"></i></button>
+                        <button class="client-delete-btn text-gray-500 hover:text-red-400" data-id="${c.id}" title="Remover"><i class="fas fa-trash text-sm"></i></button>
+                    </div>
+                `;
+                clientsList.appendChild(card);
+            });
+        };
+
+        let editingClientId = null;
+        const clientModal = document.getElementById('client-modal');
+        const clientModalTitle = document.getElementById('client-modal-title');
+        const nameInput = document.getElementById('client-name-input');
+        const contactInput = document.getElementById('client-contact-input');
+        const phoneInput = document.getElementById('client-phone-input');
+        const emailInput = document.getElementById('client-email-input');
+        const notesInput = document.getElementById('client-notes-input');
+
+        const openClientModal = (client = null) => {
+            editingClientId = client ? client.id : null;
+            clientModalTitle.textContent = client ? 'Editar Cliente' : 'Novo Cliente';
+            nameInput.value = client ? client.name : '';
+            contactInput.value = client ? (client.contact_name || '') : '';
+            phoneInput.value = client ? (client.phone || '') : '';
+            emailInput.value = client ? (client.email || '') : '';
+            notesInput.value = client ? (client.notes || '') : '';
+            clientModal.classList.remove('hidden');
+        };
+
+        document.getElementById('new-client-btn').addEventListener('click', () => openClientModal());
+        document.getElementById('client-modal-cancel-btn').addEventListener('click', () => clientModal.classList.add('hidden'));
+        document.getElementById('client-modal-save-btn').addEventListener('click', async () => {
+            if (!nameInput.value.trim()) { alert('Informe o nome do cliente.'); return; }
+            const payload = {
+                name: nameInput.value.trim(),
+                contact_name: contactInput.value.trim(),
+                phone: phoneInput.value.trim(),
+                email: emailInput.value.trim(),
+                notes: notesInput.value.trim()
+            };
+            try {
+                const url = editingClientId ? `/api/v1/admin/traffic_clients/${editingClientId}` : '/api/v1/admin/traffic_clients';
+                const res = await fetch(url, {
+                    method: editingClientId ? 'PUT' : 'POST',
+                    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                });
+                const body = await res.json();
+                if (!body.success) throw new Error(body.message || 'Falha ao salvar');
+                clientModal.classList.add('hidden');
+                await loadClients();
+            } catch (err) { alert('Erro ao salvar cliente: ' + err.message); }
+        });
+
+        clientsList.addEventListener('click', (e) => {
+            const editBtn = e.target.closest('.client-edit-btn');
+            const deleteBtn = e.target.closest('.client-delete-btn');
+            if (editBtn) {
+                const c = clients.find((x) => x.id === editBtn.dataset.id);
+                if (c) openClientModal(c);
+            } else if (deleteBtn) {
+                if (confirm('Remover este cliente da lista?')) {
+                    fetch(`/api/v1/admin/traffic_clients/${deleteBtn.dataset.id}`, { method: 'DELETE' })
+                        .then(() => loadClients());
+                }
+            }
+        });
+
+        loadClients();
+    });
+    </script>
+</body>
+</html>
