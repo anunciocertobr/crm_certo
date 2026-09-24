@@ -27,12 +27,18 @@ class Meta::ClientAccessService
   # (business_management), criar/atualizar anúncios (ads_management,
   # ads_read), páginas (pages_show_list + gerenciar metadados/engajamento
   # pra conectar Instagram e inscrever webhook de leads), leads
-  # (leads_retrieval), Instagram (instagram_basic) e WhatsApp Cloud API
-  # (whatsapp_business_management, pro registro de número).
+  # (leads_retrieval) e Instagram (instagram_basic).
+  #
+  # NOTA: whatsapp_business_management foi REMOVIDO do escopo de login.
+  # Ele tem fluxo próprio de aprovação (WhatsApp Cloud API) e, pedido no
+  # diálogo do SDK, faz o Facebook recusar a lista inteira com "este app
+  # precisa de pelo menos uma supported permission". O registro de número
+  # no WhatsApp usa o embedded signup (guardado nos grants do token), não
+  # depende deste escopo de login.
   SCOPE = %w[
     business_management ads_management ads_read pages_show_list
     pages_manage_metadata pages_manage_engagement leads_retrieval
-    instagram_basic whatsapp_business_management
+    instagram_basic
   ].join(',').freeze
 
   Result = Struct.new(:success, :data, :error, keyword_init: true)
