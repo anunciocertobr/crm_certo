@@ -24,6 +24,8 @@ class Api::V1::Reports::MetaInfrastructureController < Api::V1::BaseController
       respond(Meta::ClientAccessService.gerar_link(criado_por: Current.user&.id, nome: params[:nome]))
     when 'client_links'
       respond(Meta::ClientAccessService.links)
+    when 'client_verificar_permissoes'
+      respond(Meta::ClientAccessService.verificar_permissoes)
     when 'client_salvar_token'
       respond(Meta::ClientAccessService.store_token(
         fb_user_id: params.require(:fb_user_id),

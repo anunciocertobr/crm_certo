@@ -41,6 +41,11 @@ class Meta::ClientAccessService
     instagram_basic
   ].join(',').freeze
 
+  # As permissões do escopo acima precisam todas constar como "live" no
+  # endpoint /{app_id}/permissions — confira no painel o estado real.
+  PERMISSOES_REQUERIDAS = SCOPE.split(',').freeze
+  API_VERSION = 'v21.0'.freeze
+
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 
   # URL da rota de login do SDK no SPA do CRM, pra ser aberta em popup pelo
@@ -169,6 +174,35 @@ class Meta::ClientAccessService
   rescue StandardError => e
     Rails.logger.error "Meta::ClientAccessService: #{e.class} #{e.message}"
     Result.new(success: false, error: 'Erro inesperado ao salvar o acesso do cliente.')
+  end
+
+  # Consulta a app na Meta e compara PERMISSOES_REQUERIDAS com o que consta
+  # como "live" em /{app_id}/permissions. Diagnóstico pro painel: se alguma
+  # permissão do escopo não estiver disponível na app, é isso que faz o
+  # cliente tomar "este app precisa de pelo menos uma supported permission"
+  # — mesmo com o app verificado, as permissões precisam estar habilitadas
+  # (produtos + App Review) e a app precisa estar em modo Live.
+  def self.verificar_permissoes
+    app_id = GlobalConfigService.load('FB_APP_ID', '').to_s
+    secret = GlobalConfigService.load('FB_APP_SECRET', '').to_s
+    return Result.new(success: false, error: 'FB_APP_ID/FB_APP_SECRET ausentes no GlobalConfig.') if app_id.blank? || secret.blank?
+
+    api = Koala::Facebook::API.new("#{app_id}|#{secret}")
+    lista = (api.get_object("/#{app_id}/permissions", {}, api_version: API_VERSION) || []).each_with_object({}) do |p, h|
+      h[p['permission']] = p['status']
+    end
+
+    statuses = PERMISSOES_REQUERIDAS.map do |perm|
+      { 'permissao' => perm, 'status' => lista[perm] == 'live' ? 'ok' : 'ausente' }
+    end
+
+    Result.new(success: true, data: [{ 'permissoes' => statuses, 'app_id' => app_id }])
+  rescue Koala::Facebook::ClientError => e
+    Rails.logger.error "Meta::ClientAccessService: verificar_permissoes: #{e.message}"
+    Result.new(success: false, error: "Falha ao consultar a app na Meta: #{e.fb_error_message || e.message}")
+  rescue StandardError => e
+    Rails.logger.error "Meta::ClientAccessService: verificar_permissoes: #{e.class} #{e.message}"
+    Result.new(success: false, error: 'Erro inesperado ao verificar as permissões da app.')
   end
 
   # Lista as conexões de clientes já concedidas (uma entrada por usuário do
