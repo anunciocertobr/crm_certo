@@ -48,7 +48,7 @@ class Meta::ClientAccessService
     frontend_url = ENV['FRONTEND_URL'].presence
     return Result.new(success: false, error: 'FRONTEND_URL não configurado no ambiente.') if frontend_url.blank?
 
-    url = "#{frontend_url.gsub(%r{/+\z}, '')}/meta-client-login" \
+    url = "#{frontend_url.gsub(%r{/+\z}, '')}/meta-client.html" \
           "?app_id=#{CGI.escape(app_id)}&scope=#{CGI.escape(SCOPE)}&conectado_por=#{conectado_por}"
 
     Result.new(success: true, data: { 'url' => url })
@@ -69,7 +69,7 @@ class Meta::ClientAccessService
     grant = SecureRandom.hex(16)
     add_grant(grant, criado_por, nome)
 
-    url = "#{frontend_url.gsub(%r{/+\z}, '')}/meta-client-login" \
+    url = "#{frontend_url.gsub(%r{/+\z}, '')}/meta-client.html" \
           "?grant=#{grant}&app_id=#{CGI.escape(app_id)}&scope=#{CGI.escape(SCOPE)}"
 
     Result.new(success: true, data: { 'url' => url })
