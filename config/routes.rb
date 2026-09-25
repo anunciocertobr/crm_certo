@@ -183,6 +183,7 @@ Rails.application.routes.draw do
         post 'google_drive', to: 'google_drive#handle'
         post 'dropbox', to: 'dropbox#handle'
         post 'google_contacts', to: 'google_contacts#handle'
+        post 'criativos', to: 'criativos#handle'
         resources :whatsapp_ad_leads, only: [:index, :update]
       end
 
@@ -961,6 +962,12 @@ Rails.application.routes.draw do
         # Marketing): receptor público do token do FB.login quando o cliente
         # abre o link copiável SEM sessão no CRM. Segredo do link = grant.
         post 'meta_client/grants', to: 'meta_client/grants#create'
+
+        # Solicitar Criativo (aba da página Criação Meta): receptor público dos
+        # arquivos do cliente quando ele abre o link copiável SEM sessão no CRM.
+        # O grant valida o link e define a pasta de destino (Drive/Dropbox).
+        get 'meta_client/criativos/:grant', to: 'meta_client/criativos#show'
+        post 'meta_client/criativos', to: 'meta_client/criativos#create'
 
         # Anonymous public chat page (B14.03): resolved by slug, returns website_token.
         get 'chat_pages/:slug', to: 'chat_pages#show'
