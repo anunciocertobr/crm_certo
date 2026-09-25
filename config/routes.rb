@@ -969,6 +969,12 @@ Rails.application.routes.draw do
         get 'meta_client/criativos/:grant', to: 'meta_client/criativos#show'
         post 'meta_client/criativos', to: 'meta_client/criativos#create'
 
+        # IA dos textos do Solicitar Criativo: público como os demais, o grant
+        # valida o link e o proxy roda no servidor com as credenciais da conta
+        # (mesmo padrão do ToolsProxyController, sem chave no navegador).
+        post 'meta_client/criativos/gerar_textos', to: 'meta_client/criativos#gerar_textos'
+        get 'meta_client/criativos/:grant/ai_models/:provider', to: 'meta_client/criativos#ai_models'
+
         # Anonymous public chat page (B14.03): resolved by slug, returns website_token.
         get 'chat_pages/:slug', to: 'chat_pages#show'
 
