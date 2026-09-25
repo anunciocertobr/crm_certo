@@ -101,8 +101,11 @@ class Meta::SolicitarCriativoService
     private
 
     def preparar_arquivos(arquivos)
+      # Solicitações de campanha/edição (formulários sem mídia) são válidas:
+      # só o studio ("Enviar Mídia") exige ao menos um arquivo, e a própria
+      # página já bloqueia o envio vazio nesse modo.
       selecionados = Array(arquivos).select { |f| f.present? && f.respond_to?(:original_filename) }
-      return 'Nenhum arquivo enviado.' if selecionados.empty?
+      return [] if selecionados.empty?
 
       erro = validar_arquivos(selecionados)
       return erro if erro

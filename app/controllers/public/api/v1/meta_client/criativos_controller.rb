@@ -55,7 +55,7 @@ class Public::Api::V1::MetaClient::CriativosController < PublicController
     end
   end
 
-  # POST /public/api/v1/meta_client/criativos/gerar_textos
+  # POST /public/api/v1/meta_client/criativos/:grant/gerar_textos
   # Gera principal/título/descrição com IA (provedor+modelo escolhidos na
   # página) e devolve as três strings pra preencher o formulário de textos.
   def gerar_textos
