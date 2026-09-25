@@ -13,6 +13,13 @@ require 'securerandom'
 # tiver o link pode submeter. A diferença é que o grant NÃO expira no primeiro
 # uso (o cliente pode enviar várias vezes no mesmo link) — a pasta de destino
 # continua sendo a do grant enquanto o link estiver ativo.
+#
+# Além do lado público (gerar link, receber submissão do cliente), este
+# service atende o dashboard: detalhe de uma solicitação (com todas as
+# submissões do cliente, campos + arquivos com link de visualização),
+# atualização de status de uma submissão (recebido → produzindo → finalizado)
+# e remoção — recusar uma submissão exclui os arquivos dela do provedor, e
+# remover o link apaga tudo (submissões + arquivos + grant).
 class Meta::SolicitarCriativoService
   HOOK_APP_ID = 'meta_solicitar_criativo'.freeze
 
@@ -20,6 +27,10 @@ class Meta::SolicitarCriativoService
   # público (o arquivo atravessa o servidor até o Drive/Dropbox).
   MAX_UPLOAD_BYTES = 100 * 1024 * 1024
   MAX_FILES = 20
+
+  # Status possíveis de uma submissão. 'recusado' não fica persistido: recusar
+  # remove a submissão (e exclui os arquivos dela do Drive/Dropbox).
+  STATUS_SUBMISSAO = %w[recebido produzindo finalizado recusado].freeze
 
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 
@@ -77,7 +88,7 @@ class Meta::SolicitarCriativoService
     registrar_submissao(grant, campos, enviados)
     Result.new(success: true, data: {
                  'nome' => meta['nome'],
-                 'arquivos' => enviados,
+                 'arquivos' => enviados.map { |e| { 'nome' => e['nome'], 'tamanho' => e['tamanho'] } },
                  'enviado_em' => Time.current.iso8601
                })
   rescue StandardError => e
@@ -95,6 +106,76 @@ class Meta::SolicitarCriativoService
     lista = grants.map { |grant, meta| dado_solicitacao(grant, meta, submissoes) }
     lista.sort_by! { |s| s['criado_em'].to_s }.reverse!
     Result.new(success: true, data: [{ 'solicitacoes' => lista }])
+  end
+
+  # Detalhe de uma solicitação (dashboard): devolve a solicitação + todas as
+  # submissões do cliente (campos preenchidos + arquivos com link de
+  # visualização/baixa) pra gestão decidir aceitar (mantém no Drive/Dropbox)
+  # ou recusar (exclui os arquivos do provedor).
+  def self.detalhe_solicitacao(grant:)
+    meta = grant_para(grant)
+    return Result.new(success: false, error: 'Solicitação não encontrada.') if meta.blank?
+
+    hook = Integrations::Hook.account_hooks.find_by(app_id: HOOK_APP_ID)
+    envios = ((hook&.settings || {})['submissoes'] || {})[grant.to_s] || []
+
+    Result.new(success: true, data: {
+                 'grant' => grant,
+                 'url' => link_url(grant),
+                 'nome' => meta['nome'],
+                 'provedor' => meta['provedor'],
+                 'pasta_ref' => meta['pasta_ref'],
+                 'pasta_nome' => meta['pasta_nome'],
+                 'criado_em' => meta['criado_em'],
+                 'submissoes' => envios.map { |e| detalhe_submissao(meta, e) }
+               })
+  end
+
+  # Atualiza o status de uma submissão (recebido → produzindo → finalizado),
+  # ou recusado: remove a submissão e exclui os arquivos dela do Drive/Dropbox.
+  def self.atualizar_status(grant:, submissao_id:, status:)
+    meta = grant_para(grant)
+    return Result.new(success: false, error: 'Solicitação não encontrada.') if meta.blank?
+    return Result.new(success: false, error: 'Status inválido.') unless STATUS_SUBMISSAO.include?(status)
+
+    hook = Integrations::Hook.account_hooks.find_or_initialize_by(app_id: HOOK_APP_ID)
+    submissoes = (hook.settings || {})['submissoes'] || {}
+    envios = submissoes[grant.to_s] || []
+    sub = envios.find { |e| e['id'].to_s == submissao_id.to_s }
+    return Result.new(success: false, error: 'Envio não encontrado.') if sub.nil?
+
+    if status == 'recusado'
+      erros = excluir_arquivos_submetidos(meta, [sub])
+      submissoes[grant.to_s] = envios.reject { |e| e['id'].to_s == submissao_id.to_s }
+      persistir_submissoes(hook, submissoes)
+      return Result.new(success: true, data: { 'removido' => true, 'erros_ao_excluir' => erros })
+    end
+
+    sub['status'] = status
+    persistir_submissoes(hook, submissoes)
+    Result.new(success: true, data: detalhe_submissao(meta, sub))
+  end
+
+  # Exclui um link de solicitação: apaga as submissões + arquivos do cliente
+  # no provedor e remove o grant (o link deixa de funcionar).
+  def self.remover_link(grant:)
+    meta = grant_para(grant)
+    return Result.new(success: false, error: 'Solicitação não encontrada.') if meta.blank?
+
+    hook = Integrations::Hook.account_hooks.find_or_initialize_by(app_id: HOOK_APP_ID)
+    settings = hook.settings || {}
+    submissoes = settings['submissoes'] || {}
+    grants = settings['grants'] || {}
+    envios = submissoes[grant.to_s] || []
+
+    erros = excluir_arquivos_submetidos(meta, envios)
+
+    submissoes.delete(grant.to_s)
+    grants.delete(grant.to_s)
+    hook.settings = settings.merge('grants' => grants, 'submissoes' => submissoes)
+    hook.save!
+
+    Result.new(success: true, data: { 'removido' => true, 'erros_ao_excluir' => erros })
   end
 
   class << self
@@ -129,7 +210,12 @@ class Meta::SolicitarCriativoService
         result = subir(meta['provedor'], meta['pasta_ref'], arquivo)
         return result.error unless result.success
 
-        enviados << { 'nome' => arquivo.original_filename, 'tamanho' => arquivo.size }
+        enviados << {
+          'nome' => arquivo.original_filename,
+          'tamanho' => arquivo.size,
+          'tipo' => arquivo.content_type.to_s.presence,
+          'ref' => result.data
+        }
       end
       enviados
     end
@@ -147,7 +233,8 @@ class Meta::SolicitarCriativoService
         'criado_em' => meta['criado_em'],
         'submissoes' => envios.size,
         'arquivos' => envios.sum { |e| e['arquivos'].size },
-        'ultima_submissao' => envios.filter_map { |e| e['criado_em'] }.max
+        'ultima_submissao' => envios.filter_map { |e| e['criado_em'] }.max,
+        'ultima_status' => envios.filter_map { |e| e['status'].presence || 'recebido' }.last
       }
     end
 
@@ -164,19 +251,27 @@ class Meta::SolicitarCriativoService
     def subir(provedor, pasta_ref, arquivo)
       content = arquivo.read
 
-      if provedor == 'drive'
-        Google::DriveService.new.upload_file(
-          name: arquivo.original_filename.to_s,
-          content: content,
-          content_type: arquivo.content_type.presence || 'application/octet-stream',
-          parent_id: pasta_ref.presence
-        )
-      else
-        Dropbox::FilesService.new.upload(
-          path: [pasta_ref.to_s.gsub(%r{\A/+}, ''), arquivo.original_filename.to_s].reject(&:blank?).join('/'),
-          content: content
-        )
-      end
+      resultado =
+        if provedor == 'drive'
+          Google::DriveService.new.upload_file(
+            name: arquivo.original_filename.to_s,
+            content: content,
+            content_type: arquivo.content_type.presence || 'application/octet-stream',
+            parent_id: pasta_ref.presence
+          )
+        else
+          Dropbox::FilesService.new.upload(
+            path: [pasta_ref.to_s.gsub(%r{\A/+}, ''), arquivo.original_filename.to_s].reject(&:blank?).join('/'),
+            content: content
+          )
+        end
+      return resultado unless resultado.success
+
+      # Guarda o ref do arquivo no provedor (id no Drive / path no Dropbox) —
+      # serve pra gerar link de preview/baixa e pra excluir o arquivo se a
+      # gestão recusar ou remover o link.
+      ref = (resultado.data || {})['id'] || (resultado.data || {})['path_display'] || (resultado.data || {})['path']
+      Result.new(success: true, data: ref)
     end
 
     def registrar_submissao(grant, campos, arquivos)
@@ -189,11 +284,72 @@ class Meta::SolicitarCriativoService
       submissoes[grant] << {
         'id' => SecureRandom.hex(8),
         'criado_em' => Time.current.iso8601,
+        'status' => 'recebido',
         'campos' => sanitized,
         'arquivos' => arquivos
       }
       hook.settings = (hook.settings || {}).merge('submissoes' => submissoes)
       hook.save!
+    end
+
+    def persistir_submissoes(hook, submissoes)
+      hook.settings = (hook.settings || {}).merge('submissoes' => submissoes)
+      hook.save!
+    end
+
+    def detalhe_submissao(meta, sub)
+      {
+        'id' => sub['id'],
+        'criado_em' => sub['criado_em'],
+        'status' => sub['status'].presence || 'recebido',
+        'campos' => sub['campos'] || {},
+        'arquivos' => Array(sub['arquivos']).map { |arq| detalhe_arquivo(meta, arq) }
+      }
+    end
+
+    def detalhe_arquivo(meta, arq)
+      base = {
+        'nome' => arq['nome'],
+        'tamanho' => arq['tamanho'],
+        'tipo' => arq['tipo']
+      }
+      ref = arq['ref'].to_s.presence
+      if meta['provedor'] == 'drive'
+        if ref.present?
+          base['preview'] = "https://drive.google.com/thumbnail?id=#{ref}&sz=w1600"
+          base['download'] = "https://drive.google.com/uc?export=download&id=#{ref}"
+        end
+      elsif arq['nome'].present?
+        link = Dropbox::FilesService.new.temporary_link(
+          path: [meta['pasta_ref'].to_s.gsub(%r{\A/+}, ''), arq['nome'].to_s].reject(&:blank?).join('/')
+        )
+        base['download'] = (link.data || {})['link'] if link&.success
+      end
+      base
+    end
+
+    def excluir_arquivos_submetidos(meta, envios)
+      erros = []
+      envios.each do |envio|
+        Array(envio['arquivos']).each do |arq|
+          resultado = excluir_arquivo(meta, arq)
+          erros << resultado.error if resultado && !resultado.success
+        end
+      end
+      erros
+    end
+
+    def excluir_arquivo(meta, arq)
+      if meta['provedor'] == 'drive'
+        ref = arq['ref'].to_s.presence
+        return Result.new(success: true, data: {}) if ref.blank?
+
+        Google::DriveService.new.delete_file(file_id: ref)
+      else
+        Dropbox::FilesService.new.delete(
+          path: [meta['pasta_ref'].to_s.gsub(%r{\A/+}, ''), arq['nome'].to_s].reject(&:blank?).join('/')
+        )
+      end
     end
 
     def add_grant(grant, dados)

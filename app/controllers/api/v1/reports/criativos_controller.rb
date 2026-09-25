@@ -2,7 +2,9 @@
 
 # Despacha as ações da aba "Solicitar Criativo" da página Criação Meta
 # (Meta::SolicitarCriativoService): status (provedores conectados), gerar link
-# (público, amarrado a uma pasta de destino) e listar solicitações recebidas.
+# (público, amarrado a uma pasta de destino), listar solicitações recebidas,
+# detalhe de uma solicitação (com as submissões do cliente), atualizar o status
+# de uma submissão (produzindo/finalizado ou recusado) e remover um link.
 class Api::V1::Reports::CriativosController < Api::V1::BaseController
   def handle
     case params[:acao]
@@ -21,6 +23,16 @@ class Api::V1::Reports::CriativosController < Api::V1::BaseController
       )
     when 'solicitacoes'
       respond Meta::SolicitarCriativoService.solicitacoes
+    when 'detalhe'
+      respond Meta::SolicitarCriativoService.detalhe_solicitacao(grant: params[:grant])
+    when 'atualizar_status'
+      respond Meta::SolicitarCriativoService.atualizar_status(
+        grant: params[:grant],
+        submissao_id: params[:submissao_id],
+        status: params[:status]
+      )
+    when 'remover_link'
+      respond Meta::SolicitarCriativoService.remover_link(grant: params[:grant])
     else
       error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD, "Ação desconhecida: #{params[:acao]}", status: :unprocessable_entity)
     end
