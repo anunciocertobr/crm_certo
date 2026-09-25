@@ -38,6 +38,41 @@ class Public::Api::V1::MetaClient::CriativosController < PublicController
     end
   end
 
+  # GET /public/api/v1/meta_client/criativos/:grant/ai_models/:provider
+  # Lista os modelos de IA disponíveis pro provedor escolhido (groq/openai/
+  # gemini). Público como os demais: o grant valida o link e a credencial
+  # resolvida é a da conta, no servidor.
+  def ai_models
+    result = Meta::SolicitarCriativoAiService.ai_models(
+      grant: params[:grant],
+      provider: params[:provider]
+    )
+
+    if result.success
+      render json: { success: true, data: result.data }
+    else
+      render json: { success: false, error: result.error }, status: :unprocessable_entity
+    end
+  end
+
+  # POST /public/api/v1/meta_client/criativos/gerar_textos
+  # Gera principal/título/descrição com IA (provedor+modelo escolhidos na
+  # página) e devolve as três strings pra preencher o formulário de textos.
+  def gerar_textos
+    result = Meta::SolicitarCriativoAiService.gerar_textos(
+      grant: params[:grant],
+      provider: params[:provider],
+      model: params[:model],
+      prompt: params[:prompt]
+    )
+
+    if result.success
+      render json: { success: true, data: result.data }
+    else
+      render json: { success: false, error: result.error }, status: :unprocessable_entity
+    end
+  end
+
   private
 
   def parse_campos(raw)
