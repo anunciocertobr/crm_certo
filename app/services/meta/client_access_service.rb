@@ -48,9 +48,11 @@ class Meta::ClientAccessService
 
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 
-  # URL da rota de login do SDK no SPA do CRM, pra ser aberta em popup pelo
-  # dashboard. A rota (/meta-client-login) roda o FB.login no domínio já
-  # autorizado no app da Meta — nada de redirect URI pra cadastrar no painel.
+  # URL do popup aberto pelo dashboard (botão "Login com Facebook"). Gera um
+  # GRANT igual ao link copiável: assim o popup salva direto no endpoint
+  # público /meta_client/grants (independente do postMessage, que se perde
+  # por causa do allow-popups-to-escape-sandbox do ContentViewer) e o
+  # dashboard pega o cliente pelo polling de client_conexoes.
   # app_id e escopos vão na query, pois são públicos do app.
   def self.login_url(conectado_por:)
     app_id = GlobalConfigService.load('FB_APP_ID', '')
@@ -59,8 +61,11 @@ class Meta::ClientAccessService
     frontend_url = ENV['FRONTEND_URL'].presence
     return Result.new(success: false, error: 'FRONTEND_URL não configurado no ambiente.') if frontend_url.blank?
 
+    grant = SecureRandom.hex(16)
+    add_grant(grant, conectado_por, nil)
+
     url = "#{frontend_url.gsub(%r{/+\z}, '')}/meta-client.html" \
-          "?app_id=#{CGI.escape(app_id)}&scope=#{CGI.escape(SCOPE)}&conectado_por=#{conectado_por}"
+          "?grant=#{grant}&app_id=#{CGI.escape(app_id)}&scope=#{CGI.escape(SCOPE)}&conectado_por=#{conectado_por}"
 
     Result.new(success: true, data: { 'url' => url })
   end
