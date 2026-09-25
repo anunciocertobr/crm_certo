@@ -137,8 +137,9 @@ class Meta::SolicitarCriativoAiService
       else
         modelo = model.presence || (provider == 'openai' ? 'gpt-4o-mini' : 'llama-3.3-70b-versatile')
         base = provider == 'openai' ? (credencial[:base_url].presence || OPENAI_BASE) : GROQ_BASE
+        url = provider == 'groq' ? "#{base}/openai/v1/chat/completions" : "#{base}/v1/chat/completions"
         response = HTTParty.post(
-          "#{base}/v1/chat/completions",
+          url,
           headers: cabecalho(credencial[:key]),
           body: {
             model: modelo,
