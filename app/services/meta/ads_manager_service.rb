@@ -935,7 +935,11 @@ class Meta::AdsManagerService
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
 
     id = ad_account_id.to_s.delete_prefix('act_')
-    get("/act_#{id}/saved_audiences", fields: 'id,name,description,targeting,approximate_count', limit: 200)
+    # `approximate_count` NÃO é um campo válido do edge /saved_audiences —
+    # a Graph API responde 400 (#100) "Tried accessing nonexisting field"
+    # quando a conta tem público salvo, derrubando a lista inteira. Usamos
+    # os bounds (válidos), que o front mapeia pra exibir o tamanho.
+    get("/act_#{id}/saved_audiences", fields: 'id,name,description,targeting,approximate_count_lower_bound,approximate_count_upper_bound', limit: 200)
   end
 
   # Recria, do zero, um público salvo de uma conta em OUTRA conta — a Graph
