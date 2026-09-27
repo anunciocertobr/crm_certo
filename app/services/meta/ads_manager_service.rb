@@ -767,63 +767,231 @@ class Meta::AdsManagerService
     get("/act_#{id}/adspixels", fields: 'id,name')
   end
 
-  # Usado só pelo fluxo de "Duplicar público pra outra conta" — o `rule`
-  # (URL contém) de um público de site é um JSON aninhado bem específico da
-  # Graph API; em vez de tentar reconstruí-lo perfeitamente, o duplicar só
-  # reaproveita nome/descrição/retention_days/lookalike_spec e deixa o
-  # usuário escolher de novo o pixel/público de origem (que são da CONTA
-  # DE DESTINO, nunca os mesmos IDs da conta de origem).
-  def audience_detail(audience_id:)
-    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
-
-    get("/#{audience_id}", fields: 'id,name,subtype,description,retention_days,lookalike_spec')
-  end
-
-  # retention_days: janela de quem entra no público (1-180, limite da própria
-  # Graph API). Sem url_contains, usa todo mundo que visitou o site
-  # (PageView) em vez de uma página específica.
-  def create_website_audience(ad_account_id:, name:, pixel_id:, retention_days:, url_contains: nil, description: nil)
+  # Lista as Páginas de uma conta de anúncio (resolve a Business Manager
+  # dona da conta e segue a mesma owned_pages + client_pages de
+  # pages_for_business). Os públicos de engajamento (Facebook Page /
+  # Instagram) são sempre por Página, e quem chega aqui muitas vezes só tem o
+  # id da conta de anúncio em mãos — não o da BM que está selecionado na UI.
+  def pages_for_ad_account(ad_account_id:)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
 
     id = ad_account_id.to_s.delete_prefix('act_')
+    account = get("/act_#{id}", fields: 'owner')
+    return account unless account.success
+
+    business_id = account.data.dig('owner', 'id')
+    if business_id.blank?
+      return Result.new(success: false, error: 'Esta conta de anúncio não está dentro de uma Business Manager.')
+    end
+
+    pages_for_business(business_id: business_id)
+  end
+
+  # Perfil profissional do Instagram ligado a uma Página — é o `ig_user_id`
+  # que o público de engajamento do Instagram usa como event_source. Pode
+  # falhar (página sem perfil profissional ou sem permissão), e nesse caso a
+  # UI deixa o usuário digitar o id na mão.
+  def instagram_account_for_page(page_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    result = get("/#{page_id}", fields: 'instagram_business_account{id,username,name}')
+    return result unless result.success
+
+    ig = result.data['instagram_business_account']
+    return Result.new(success: false, error: 'Esta Página não tem perfil profissional do Instagram vinculado.') if ig.blank?
+
+    Result.new(success: true, data: { 'id' => ig['id'], 'name' => ig['username'].presence || ig['name'].presence || ig['id'] })
+  end
+
+  # `fields` de um custom audience varia MUITO por subtype, e a lista de campos
+  # LEGÍVEIS é menor do que a de escrita (não existem video_id/page_id/app_id
+  # na leitura — o que volta é rule/video_group_ids/data_source*). Pedir um
+  # campo inexistente derruba a leitura inteira com #100 "Tried accessing
+  # nonexisting field", então tentamos a lista completa e caímos pra um mínimo
+  # que ainda tem o `rule` (é dele que sai o tipo real do público) se a Meta
+  # recusar.
+  AUDIENCE_DETAIL_FIELDS = %w[
+    id name subtype description retention_days prefill lookalike_spec
+    origin_audience_id pixel_id rule data_source data_source_types
+    video_group_ids facebook_page_id
+    included_custom_audiences excluded_custom_audiences
+  ].freeze
+
+  AUDIENCE_DETAIL_FALLBACK_FIELDS =
+    'id,name,subtype,description,retention_days,lookalike_spec,rule,pixel_id,origin_audience_id'.freeze
+
+  # Usado pelo "Duplicar público" pra preencher o formulário com os dados REAIS
+  # do público de origem (tipo, pixel/página/app/vídeo de origem, retenção,
+  # URL, lookalike_spec) — antes só voltavam nome/descrição/retention/lookalike,
+  # então qualquer público que não fosse WEBSITE/LOOKALIKE/CUSTOM (ex.: um de
+  # vídeo) caía no fallback "Site (Pixel)" e ficava travado pedindo pixel.
+  def audience_detail(audience_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    result = get("/#{audience_id}", fields: AUDIENCE_DETAIL_FIELDS.join(','))
+    return result if result.success
+
+    get("/#{audience_id}", fields: AUDIENCE_DETAIL_FALLBACK_FIELDS)
+  end
+
+  # Nome do público de origem de um semelhante, pra dar pra pré-selecionar na
+  # conta de destino o público com o mesmo nome ao duplicar.
+  def audience_name(audience_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    get("/#{audience_id}", fields: 'id,name')
+  end
+
+  # Monta a regra (rule) de um público a partir de uma fonte de evento. É o
+  # mesmo formato pra site/pixel, página, Instagram e app — o que muda é o
+  # `type` do event_source e o filtro do evento.
+  #
+  # max_days existe porque o teto de retenção NÃO é o mesmo pra todos os tipos:
+  # público de site/pixel vai até 180 dias, enquanto engajamento, Instagram,
+  # app e vídeo vão até 365. A Graph API rejeita acima do limite com erro
+  # genérico de parâmetro inválido, então cortamos aqui.
+  def audience_rule(event_source_type:, event_source_id:, retention_days:, event_value: nil, url_contains: nil, max_days: 365)
     filter = if url_contains.present?
                { field: 'url', operator: 'i_contains', value: url_contains }
              else
-               { field: 'event', operator: 'eq', value: 'PageView' }
+               { field: 'event', operator: 'eq', value: event_value.presence || 'PageView' }
              end
-    rule = {
+
+    {
       inclusions: {
         operator: 'or',
         rules: [
           {
-            event_sources: [{ type: 'pixel', id: pixel_id }],
-            retention_seconds: retention_days.to_i.clamp(1, 180) * 86_400,
+            event_sources: [{ id: event_source_id.to_s, type: event_source_type }],
+            retention_seconds: retention_days.to_i.clamp(1, max_days) * 86_400,
             filter: { operator: 'and', filters: [filter] }
           }
         ]
       }
     }
-
-    post("/act_#{id}/customaudiences", {
-      name: name,
-      subtype: 'WEBSITE',
-      description: description,
-      rule: rule.to_json
-    }.compact)
   end
 
-  # ratio: 0.01 a 0.20 (1% a 20% do país, granularidade mínima da própria
-  # Graph API pra Lookalike).
-  def create_lookalike_audience(ad_account_id:, name:, origin_audience_id:, country:, ratio:)
+  # retention_days: janela de quem entra no público (1-180, o teto dos públicos
+  # de site/pixel na Graph API). Sem url_contains, usa todo mundo que visitou
+  # o site (PageView) em vez de uma página específica.
+  def create_website_audience(ad_account_id:, name:, pixel_id:, retention_days:, url_contains: nil, description: nil)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
 
     id = ad_account_id.to_s.delete_prefix('act_')
     post("/act_#{id}/customaudiences", {
       name: name,
+      description: description,
+      rule: audience_rule(
+        event_source_type: 'pixel',
+        event_source_id: pixel_id,
+        retention_days: retention_days,
+        event_value: 'PageView',
+        url_contains: url_contains,
+        max_days: 180
+      ).to_json,
+      prefill: 1
+    }.compact)
+  end
+
+  # Público de engajamento com a Facebook Page — "interagiu com a página"
+  # (page_engaged), "interagiu com posts" (page_post_interaction), "abriu o
+  # formulário de lead" (lead_form_open) ou "abriu o anúncio de experience"
+  # (instant_experience_open). Desde set/2018 a Graph API NÃO aceita `subtype`
+  # nesses públicos (a exceção é vídeo): a identidade vem da rule.
+  def create_engagement_audience(ad_account_id:, name:, page_id:, retention_days:, event_value: 'page_engaged', description: nil)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    post("/act_#{id}/customaudiences", {
+      name: name,
+      description: description,
+      rule: audience_rule(
+        event_source_type: 'page',
+        event_source_id: page_id,
+        retention_days: retention_days,
+        event_value: event_value
+      ).to_json,
+      prefill: 1
+    }.compact)
+  end
+
+  # Público do Instagram: o event_source é o ig_user_id (tipo 'page') e o
+  # evento ig_business_profile_engaged. É o mesmo formato do de engajamento,
+  # só que a fonte é o perfil profissional em vez da Página.
+  def create_instagram_audience(ad_account_id:, name:, ig_user_id:, retention_days:, event_value: 'ig_business_profile_engaged', description: nil)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    post("/act_#{id}/customaudiences", {
+      name: name,
+      description: description,
+      rule: audience_rule(
+        event_source_type: 'page',
+        event_source_id: ig_user_id,
+        retention_days: retention_days,
+        event_value: event_value
+      ).to_json,
+      prefill: 1
+    }.compact)
+  end
+
+  # Público de app: event_source tipo 'app' com o app_id, e o evento do app
+  # ('any' = qualquer evento, ou o nome do evento, ex.: 'Purchase').
+  def create_app_audience(ad_account_id:, name:, app_id:, retention_days:, event_name: 'any', description: nil)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    post("/act_#{id}/customaudiences", {
+      name: name,
+      description: description,
+      rule: audience_rule(
+        event_source_type: 'app',
+        event_source_id: app_id,
+        retention_days: retention_days,
+        event_value: event_name.presence || 'any'
+      ).to_json,
+      prefill: 1
+    }.compact)
+  end
+
+  # Público de vídeo: aqui a Graph API aceita sim o `subtype` (é a exceção
+  # documentada dos públicos de engajamento) — video_id + retenção. O vídeo
+  # precisa pertencer à conta (ou a uma Página da conta).
+  def create_video_audience(ad_account_id:, name:, video_id:, retention_days:, description: nil)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    post("/act_#{id}/customaudiences", {
+      name: name,
+      subtype: 'VIDEO',
+      description: description,
+      video_id: video_id,
+      retention_days: retention_days.to_i.clamp(1, 365)
+    }.compact)
+  end
+
+  # ratio: 0.01 a 0.20 (1% a 20% do país, granularidade mínima da própria
+  # Graph API pra Lookalike). A origem é OU um público que já existe na
+  # própria conta (origin_audience_id — serve pra qualquer tipo: site, vídeo,
+  # engajamento, Instagram, app, lista de clientes e também público salvo),
+  # OU uma source_spec, que é como se faz "semelhante de site/engajamento/
+  # app" direto da fonte, sem precisar antes criar o público-semente.
+  def create_lookalike_audience(ad_account_id:, name:, country:, ratio:, origin_audience_id: nil, source_spec: nil, lookalike_type: 'similarity')
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+    if origin_audience_id.blank? && source_spec.blank?
+      return Result.new(success: false, error: 'Escolha o público de origem do público semelhante.')
+    end
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    spec = { type: lookalike_type.presence || 'similarity', country: country.to_s.upcase.presence || 'BR', ratio: ratio.to_f.clamp(0.01, 0.20) }
+    spec[:source_spec] = source_spec if source_spec.present?
+
+    post("/act_#{id}/customaudiences", {
+      name: name,
       subtype: 'LOOKALIKE',
-      origin_audience_id: origin_audience_id,
-      lookalike_spec: { type: 'similarity', country: country, ratio: ratio.to_f.clamp(0.01, 0.20) }.to_json
-    })
+      origin_audience_id: origin_audience_id.presence,
+      lookalike_spec: spec.to_json
+    }.compact)
   end
 
   # Cria só o "balde" vazio — a população de fato (hash dos contatos) é um

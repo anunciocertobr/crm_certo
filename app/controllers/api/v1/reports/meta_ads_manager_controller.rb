@@ -98,8 +98,14 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
       respond(service.custom_audiences(ad_account_id: params.require(:id_conta_anuncio)))
     when 'listar_pixels'
       respond(service.pixels(ad_account_id: params.require(:id_conta_anuncio)))
+    when 'listar_paginas_por_conta'
+      respond(service.pages_for_ad_account(ad_account_id: params.require(:id_conta_anuncio)))
+    when 'conta_instagram_da_pagina'
+      respond(service.instagram_account_for_page(page_id: params.require(:id_pagina)))
     when 'detalhe_publico'
       respond(service.audience_detail(audience_id: params.require(:id_publico)))
+    when 'nome_publico'
+      respond(service.audience_name(audience_id: params.require(:id_publico)))
     when 'criar_publico_site'
       respond(service.create_website_audience(
         ad_account_id: params.require(:id_conta_anuncio),
@@ -109,11 +115,48 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
         url_contains: params[:url_contains],
         description: params[:description]
       ))
+    when 'criar_publico_engajamento'
+      respond(service.create_engagement_audience(
+        ad_account_id: params.require(:id_conta_anuncio),
+        name: params.require(:name),
+        page_id: params.require(:page_id),
+        retention_days: params.require(:retention_days),
+        event_value: params[:evento] || 'page_engaged',
+        description: params[:description]
+      ))
+    when 'criar_publico_instagram'
+      respond(service.create_instagram_audience(
+        ad_account_id: params.require(:id_conta_anuncio),
+        name: params.require(:name),
+        ig_user_id: params.require(:ig_user_id),
+        retention_days: params.require(:retention_days),
+        event_value: params[:evento] || 'ig_business_profile_engaged',
+        description: params[:description]
+      ))
+    when 'criar_publico_app'
+      respond(service.create_app_audience(
+        ad_account_id: params.require(:id_conta_anuncio),
+        name: params.require(:name),
+        app_id: params.require(:app_id),
+        retention_days: params.require(:retention_days),
+        event_name: params[:evento] || 'any',
+        description: params[:description]
+      ))
+    when 'criar_publico_video'
+      respond(service.create_video_audience(
+        ad_account_id: params.require(:id_conta_anuncio),
+        name: params.require(:name),
+        video_id: params.require(:video_id),
+        retention_days: params.require(:retention_days),
+        description: params[:description]
+      ))
     when 'criar_publico_semelhante'
       respond(service.create_lookalike_audience(
         ad_account_id: params.require(:id_conta_anuncio),
         name: params.require(:name),
-        origin_audience_id: params.require(:origin_audience_id),
+        origin_audience_id: params[:origin_audience_id],
+        source_spec: parse_json_object(params[:source_spec]),
+        lookalike_type: params[:tipo_similaridade],
         country: params.require(:country),
         ratio: params.require(:ratio)
       ))
