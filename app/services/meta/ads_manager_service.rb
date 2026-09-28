@@ -362,7 +362,7 @@ class Meta::AdsManagerService
 
     source = get(
       "/#{campaign_id}",
-      fields: 'name,adsets.limit(1){name,daily_budget,targeting,ads.limit(1){name,creative{body,title,image_url,video_id}}}'
+      fields: 'name,adsets.limit(1){name,daily_budget,targeting,ads.limit(1){name,creative{body,title,image_url,thumbnail_url,video_id,object_story_spec}}}'
     )
     return step_error(source, 'campanha de origem') unless source.success
 
@@ -378,6 +378,12 @@ class Meta::AdsManagerService
 
     optimization_goal = new_optimization_goal.presence || DEFAULT_OPTIMIZATION_GOAL_BY_OBJECTIVE[new_objective]
 
+    # Sem copiar o link de destino, toda campanha de tráfego/vendas
+    # duplicada aponta pra Página do Facebook em vez do site original
+    # (build_creative cai no fallback "https://www.facebook.com/<page>")
+    # — a cópia "funciona" mas entrega tráfego para o lugar errado.
+    link = creative.dig('object_story_spec', 'link_data', 'link').presence
+
     campanha = {
       'name' => overrides['name'].presence || "#{source.data['name']} (#{new_objective})",
       'status' => 'PAUSED',
@@ -392,6 +398,7 @@ class Meta::AdsManagerService
       'title' => overrides['title'].presence || creative['title'],
       'body' => overrides['body'].presence || creative['body'],
       'asset_url' => asset_url,
+      'link' => overrides['link'].presence || link,
       'targeting' => adset['targeting'] || {}
     }.compact
 
@@ -443,12 +450,53 @@ class Meta::AdsManagerService
     created_adsets = []
     adsets_specs.each do |adset_spec|
       result = create_adset_with_ads(act: act, campaign_id: campaign.data['id'], adset_spec: adset_spec, lead_form_id: lead_form_id)
-      return result unless result.success
+      unless result.success
+        # Se qualquer etapa depois da campanha falhar, a campanha que a gente
+        # acabou de criar fica PAUSED e órfã na conta do cliente — sujeira que
+        # aparece na lista de campanhas e que ninguém sabe de onde veio (já
+        # aconteceu: "não entendi essa campanha nova"). Não há gasto (PAUSED),
+        # então deletar o que este mesmo fluxo criou é seguro.
+        return result.tap do
+          discard_orphan_campaign(campaign.data['id'])
+          discard_orphan_lead_form(lead_form_id)
+        end
+      end
 
       created_adsets << result.data
     end
 
     Result.new(success: true, data: [{ 'body' => { 'success' => true, 'campaign_id' => campaign.data['id'], 'adsets' => created_adsets } }])
+  end
+
+  # Apaga a campanha criada por este mesmo fluxo após uma falha, sem deixar
+  # isso virar erro novo — o erro real (o que importou pro usuário) já está
+  # na Result que sobe. Falha ao apagar é só log.
+  def discard_orphan_campaign(campaign_id)
+    return if campaign_id.blank?
+
+    result = delete("/#{campaign_id}")
+    if result.success
+      Rails.logger.info "Meta::AdsManagerService: campanha órfã #{campaign_id} removida após falha no fluxo"
+    else
+      Rails.logger.error "Meta::AdsManagerService: não consegui remover campanha órfã #{campaign_id} (#{result.error})"
+    end
+  end
+
+  # Mesmo raciocínio da campanha órfã, pro formulário de cadastro: ele é
+  # criado ANTES da campanha (o anúncio precisa do `lead_gen_form_id`), então
+  # uma falha depois deixava o formulário_ACTIVE e sem campanha no Gerenciador
+  # — aparecia na lista de formulários da Página como lixo. A Meta não aceita
+  # DELETE em leadgen_forms, mas aceita arquivar (`status=ARCHIVED` no próprio
+  # nó), que é o mesmo que o Gerenciador faz.
+  def discard_orphan_lead_form(lead_form_id)
+    return if lead_form_id.blank?
+
+    result = post("/#{lead_form_id}", { status: 'ARCHIVED' }, @page&.page_access_token)
+    if result.success
+      Rails.logger.info "Meta::AdsManagerService: formulário de lead órfão #{lead_form_id} arquivado após falha no fluxo"
+    else
+      Rails.logger.error "Meta::AdsManagerService: não consegui arquivar formulário de lead órfão #{lead_form_id} (#{result.error})"
+    end
   end
 
   # Cria um conjunto de anúncios + todos os seus anúncios (1 ou mais) dentro
@@ -507,7 +555,7 @@ class Meta::AdsManagerService
 
     source = get(
       "/#{source_adset_id}",
-      fields: 'name,daily_budget,targeting,ads.limit(1){name,creative{body,title,image_url,video_id}}'
+      fields: 'name,daily_budget,targeting,ads.limit(1){name,creative{body,title,image_url,thumbnail_url,video_id,object_story_spec}}'
     )
     return step_error(source, 'conjunto de origem') unless source.success
 
@@ -519,6 +567,7 @@ class Meta::AdsManagerService
     return Result.new(success: false, error: 'Não encontrei imagem nem vídeo no anúncio de origem pra reaproveitar.') if asset_url.blank?
 
     target_objective = target_campaign.data['objective']
+    link = creative.dig('object_story_spec', 'link_data', 'link').presence
     campanha = {
       'objective' => target_objective,
       'optimization_goal' => new_optimization_goal.presence || DEFAULT_OPTIMIZATION_GOAL_BY_OBJECTIVE[target_objective],
@@ -531,6 +580,7 @@ class Meta::AdsManagerService
       'title' => overrides['title'].presence || creative['title'],
       'body' => overrides['body'].presence || creative['body'],
       'asset_url' => asset_url,
+      'link' => overrides['link'].presence || link,
       'targeting' => source.data['targeting'] || {}
     }.compact
 
@@ -543,6 +593,9 @@ class Meta::AdsManagerService
     end
 
     create_adset_and_ad(act: act, campaign_id: target_campaign_id, campanha: campanha, lead_form_id: lead_form_id)
+      .tap do |result|
+        discard_orphan_lead_form(lead_form_id) unless result.success
+      end
   end
 
   # Duplica só o ANÚNCIO (criativo) pra dentro de um CONJUNTO já existente —
@@ -559,7 +612,7 @@ class Meta::AdsManagerService
     target_campaign = get("/#{target_adset.data['campaign_id']}", fields: 'objective')
     return step_error(target_campaign, 'campanha de destino') unless target_campaign.success
 
-    source_ad = get("/#{source_ad_id}", fields: 'name,creative{body,title,image_url,video_id}')
+    source_ad = get("/#{source_ad_id}", fields: 'name,creative{body,title,image_url,thumbnail_url,video_id,object_story_spec}')
     return step_error(source_ad, 'anúncio de origem') unless source_ad.success
 
     creative_src = source_ad.data['creative'] || {}
@@ -573,7 +626,8 @@ class Meta::AdsManagerService
       'ad_status' => 'PAUSED',
       'title' => overrides['title'].presence || creative_src['title'],
       'body' => overrides['body'].presence || creative_src['body'],
-      'asset_url' => asset_url
+      'asset_url' => asset_url,
+      'link' => overrides['link'].presence || creative_src.dig('object_story_spec', 'link_data', 'link').presence
     }.compact
 
     lead_form_id = nil
@@ -585,9 +639,13 @@ class Meta::AdsManagerService
     end
 
     creative = build_creative(act: act, campanha: campanha, lead_form_id: lead_form_id)
-    return step_error(creative, 'criativo') unless creative.success
+    unless creative.success
+      discard_orphan_lead_form(lead_form_id)
+      return step_error(creative, 'criativo')
+    end
 
     create_ad_only(act: act, adset_id: target_adset_id, creative_id: creative.data['id'], campanha: campanha)
+      .tap { |result| discard_orphan_lead_form(lead_form_id) unless result.success }
   end
 
   # --- Aba "Criação Meta" (Marketing) — formulários de lead avulsos e
@@ -1536,12 +1594,47 @@ class Meta::AdsManagerService
   # Extrai a URL pública reaproveitável de um criativo já existente (imagem
   # direta, ou a URL de origem do vídeo) — usado por toda duplicação que lê
   # um anúncio de origem pra recriar o criativo em outro lugar.
+  # O criativo tem TRÊS lugares possíveis pra mídia, e nenhum deles serve
+  # sozinho — usar só o primeiro era o que fazia toda duplicação de campanha
+  # com vídeo falhar com "Não encontrei imagem nem vídeo no anúncio de
+  # origem" (confirmado na conta Anuncio Certo Boleto):
+  #
+  #   1. `image_url`/`thumbnail_url` — só vem em anúncio de imagem.
+  #   2. `video_id` (do próprio anúncio) — o `.mp4` (`source`) NÃO vem nesse
+  #      caso: vídeo de nível de anúncio/conta não expõe `source` pra este
+  #      token, e a Graph devolve o campo simplesmente omitido (sem erro).
+  #   3. `object_story_spec.video_data.video_id` — o vídeo que a PÁSTA
+  #      realmente é dona; esse sim devolve `source` normalmente.
+  #
+  # Imagem de anúncio de cadastro/formulário também só existe em
+  # `object_story_spec.link_data.picture`, nunca no `image_url` achatado.
   def resolve_creative_source_asset(creative)
-    return creative['image_url'] if creative['image_url'].present?
-    return nil if creative['video_id'].blank?
+    return nil if creative.blank?
 
-    video = get("/#{creative['video_id']}", fields: 'source')
-    video.success ? video.data['source'] : nil
+    oss = creative['object_story_spec'] || {}
+    link_data = oss['link_data'] || {}
+    video_data = oss['video_data'] || {}
+
+    image = creative['image_url'].presence ||
+            link_data['picture'].presence ||
+            video_data['image_url'].presence ||
+            creative['thumbnail_url'].presence
+    return image if image.present?
+
+    # `video_id` do anúncio primeiro (é o mais comum em campanha criada por
+    # este painel) e o do object_story_spec como reserva — os dois podem
+    # estar presentes e ser arquivos diferentes, então tenta os dois.
+    video_ids = [creative['video_id'], video_data['video_id']].compact.uniq
+    video_ids.each do |video_id|
+      video = get("/#{video_id}", fields: 'source,picture')
+      next unless video.success
+
+      data = video.data || {}
+      return data['source'] if data['source'].present?
+      return data['picture'] if data['picture'].present?
+    end
+
+    nil
   end
 
   # `asset_base64` continua funcionando (upload direto de bytes, usado pelo
@@ -1917,16 +2010,42 @@ class Meta::AdsManagerService
     questions = campanha['lead_questions'].presence || [{ type: 'FULL_NAME' }, { type: 'EMAIL' }]
     privacy_url = campanha['privacy_policy_url'].presence || 'https://www.anunciocertobr.com.br/privacidade'
 
-    post(
+    base_name = campanha['lead_form_name'].presence || "#{campanha['name']} - Formulário"
+
+    # A Meta exige nome ÚNICO de formulário por página e recusa com
+    # "O nome do formulário já existe" (subcode 1892019) — duplicar a mesma
+    # campanha para Leads duas vezes, ou reexecutar a criação, batia sempre
+    # na segunda. Tenta o nome pedido e, se colidir, acresenta um contador.
+    result = post(
       "/#{@page&.page_id}/leadgen_forms",
       {
-        name: campanha['lead_form_name'].presence || "#{campanha['name']} - Formulário",
+        name: base_name,
         questions: questions.to_json,
         privacy_policy: { url: privacy_url, link_text: 'Política de Privacidade' }.to_json,
         follow_up_action_url: campanha['follow_up_action_url'].presence || "https://www.facebook.com/#{@page&.page_id}"
       },
       @page&.page_access_token
     )
+    return result if result.success
+
+    name_taken = result.error.to_s.include?('1892019') || result.error.to_s.downcase.include?('já existe')
+    return result unless name_taken
+
+    2.upto(4) do |n|
+      retry_result = post(
+        "/#{@page&.page_id}/leadgen_forms",
+        {
+          name: "#{base_name} (#{n})",
+          questions: questions.to_json,
+          privacy_policy: { url: privacy_url, link_text: 'Política de Privacidade' }.to_json,
+          follow_up_action_url: campanha['follow_up_action_url'].presence || "https://www.facebook.com/#{@page&.page_id}"
+        },
+        @page&.page_access_token
+      )
+      return retry_result if retry_result.success
+    end
+
+    result
   end
 
   # POST multipart de verdade (a Graph API não aceita vídeo como campo de
@@ -1992,6 +2111,25 @@ class Meta::AdsManagerService
   # assim que o método declara QUALQUER parâmetro nomeado, mesmo que a
   # chamada não tivesse nada a ver com ele — já aconteceu, ver commit da
   # correção).
+  # A Graph API devolve três coisas e a que ajuda o usuário é a terceira:
+  #   message       -> "Invalid parameter" (inglês, genérico, inútil)
+  #   error_user_msg-> "Você não pode veicular anúncios de cadastros até sua
+  #                    Página aceitar os Termos de Serviço..." (português, diz
+  #                    exatamente o que fazer)
+  #   error_subcode -> 1815089 (o número que identifica o problema)
+  # Antes só a `message` ia pro painel, então toda falha de criação parecia a
+  # mesma e o usuário não tinha como descobrir a causa.
+  def graph_error_message(parsed, fallback)
+    error = parsed.is_a?(Hash) ? parsed['error'] : nil
+    return fallback if error.blank?
+
+    parts = []
+    parts << error['error_user_msg'].presence || error['message'].presence
+    codigo = error['error_subcode'].presence || error['code'].presence
+    parts << "(código #{codigo})" if codigo.present?
+    parts.compact.join(' ').presence || fallback
+  end
+
   def get(path, params, override_token = nil)
     uri = URI("#{BASE_URL}#{path}")
     uri.query = URI.encode_www_form(params.merge(access_token: override_token || @token))
@@ -2005,7 +2143,7 @@ class Meta::AdsManagerService
 
     unless response.code.to_i.between?(200, 299)
       Rails.logger.error "Meta::AdsManagerService: GET #{path} -> #{response.code} #{response.body}"
-      return Result.new(success: false, error: body.dig('error', 'message') || 'Falha ao consultar a Graph API da Meta.')
+      return Result.new(success: false, error: graph_error_message(body, 'Falha ao consultar a Graph API da Meta.'))
     end
 
     Result.new(success: true, data: body['data'] || body)
@@ -2030,7 +2168,7 @@ class Meta::AdsManagerService
 
     unless response.code.to_i.between?(200, 299)
       Rails.logger.error "Meta::AdsManagerService: POST #{path} -> #{response.code} #{response.body}"
-      return Result.new(success: false, error: parsed.dig('error', 'message') || 'Falha ao gravar na Graph API da Meta.')
+      return Result.new(success: false, error: graph_error_message(parsed, 'Falha ao gravar na Graph API da Meta.'))
     end
 
     Result.new(success: true, data: parsed)
@@ -2053,7 +2191,7 @@ class Meta::AdsManagerService
 
     unless response.code.to_i.between?(200, 299)
       Rails.logger.error "Meta::AdsManagerService: DELETE #{path} -> #{response.code} #{response.body}"
-      return Result.new(success: false, error: parsed.dig('error', 'message') || 'Falha ao excluir na Graph API da Meta.')
+      return Result.new(success: false, error: graph_error_message(parsed, 'Falha ao excluir na Graph API da Meta.'))
     end
 
     Result.new(success: true, data: parsed)
