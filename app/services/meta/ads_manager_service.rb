@@ -605,10 +605,13 @@ class Meta::AdsManagerService
   # tendo a permissão). Isso evita depender só da única linha em
   # Channel::FacebookPage: qualquer Página que a BM escolhida enxergue pode
   # ser usada, não só a que já está conectada como canal de mensagens.
+  # `instagram_business_account` entra nos fields porque é por ela que a Meta
+  # associa um perfil profissional a uma Página — é o que dá a lista de
+  # contas de Instagram (e os Reels) de uma BM.
   def pages_for_business(business_id:)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
 
-    fields = 'id,name'
+    fields = 'id,name,instagram_business_account{id,username,name}'
     owned = get("/#{business_id}/owned_pages", fields: fields)
     return owned unless owned.success
 
@@ -767,24 +770,172 @@ class Meta::AdsManagerService
     get("/act_#{id}/adspixels", fields: 'id,name')
   end
 
-  # Lista as Páginas de uma conta de anúncio (resolve a Business Manager
-  # dona da conta e segue a mesma owned_pages + client_pages de
-  # pages_for_business). Os públicos de engajamento (Facebook Page /
-  # Instagram) são sempre por Página, e quem chega aqui muitas vezes só tem o
-  # id da conta de anúncio em mãos — não o da BM que está selecionado na UI.
-  def pages_for_ad_account(ad_account_id:)
+  # Lista as Páginas que podem criar públicos de engajamento numa conta de
+  # anúncio (Facebook Page / Instagram) e as contas de Instagram da mesma
+  # origem. Segue a mesma owned_pages + client_pages de pages_for_business.
+  #
+  # business_id: a BM que está selecionada na UI. É preferível a resolver
+  # pelo `owner` da conta porque conta de anúncio comprada por terceiro NÃO
+  # tem o dono do gerenciador: o `owner` de uma conta cliente é outra BM (ou
+  # a própria pessoa), e as Páginas que o usuário realmente administra estão
+  # na BM da UI — no caso real que motivou isso, o `owner` apontava para uma
+  # BM diferente e a lista vinha sem as Páginas da conta.
+  def pages_for_ad_account(ad_account_id:, business_id: nil)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
 
-    id = ad_account_id.to_s.delete_prefix('act_')
-    account = get("/act_#{id}", fields: 'owner')
-    return account unless account.success
-
-    business_id = account.data.dig('owner', 'id')
+    business_id = business_id.presence || owning_business_of_ad_account(ad_account_id)
     if business_id.blank?
-      return Result.new(success: false, error: 'Esta conta de anúncio não está dentro de uma Business Manager.')
+      return Result.new(
+        success: false,
+        error: 'Não foi possível localizar a Business Manager desta conta de anúncio. Selecione a BM no topo da tela.'
+      )
     end
 
     pages_for_business(business_id: business_id)
+  end
+
+  # Contas de Instagram (perfil profissional) ligadas às Páginas de uma BM —
+  # é o `ig_user_id` que o público de engajamento do Instagram e a listagem de
+  # Reels usam. Páginas sem perfil profissional simplesmente não entram.
+  def instagram_accounts_for_business(business_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    pages = pages_for_business(business_id: business_id)
+    return pages unless pages.success
+
+    accounts = pages.data.filter_map do |page|
+      ig = page['instagram_business_account']
+      next if ig.blank? || ig['id'].blank?
+
+      {
+        'id' => ig['id'],
+        'username' => ig['username'],
+        'name' => ig['name'].presence || ig['username'],
+        'page_id' => page['id'],
+        'page_name' => page['name']
+      }
+    end.uniq { |ig| ig['id'] }
+
+    Result.new(success: true, data: accounts)
+  end
+
+  # Lista os vídeos disponíveis pra criar um público de vídeo, com as
+  # informações que o Gerenciador de Anúncios mostra na hora de escolher.
+  # A escolha de origem segue as três abas do Ad Manager:
+  #
+  #   page    -> GET /{page_id}/videos  (Facebook da Página)
+  #   ig      -> GET /{ig_user_id}/media filtrando media_type=VIDEO
+  #               (Reels do perfil profissional)
+  #   conta   -> GET /me/videos (Facebook da conta conectada)
+  #
+  # Os IDs que a Audience exige no `video_id` são exatamente o id do vídeo do
+  # Facebook, o id da mídia do Reels ou o id do vídeo da própria conta.
+  def videos_by_source(source:, source_id: nil, limit: 50)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    case source.to_s
+    when 'page'
+      return Result.new(success: false, error: 'Escolha a Página do Facebook de onde puxar o vídeo.') if source_id.blank?
+
+      page_videos(page_id: source_id, limit: limit)
+    when 'ig'
+      return Result.new(success: false, error: 'Escolha a conta de Instagram de onde puxar o vídeo.') if source_id.blank?
+
+      instagram_reels(ig_user_id: source_id, limit: limit)
+    when 'conta'
+      account_videos(limit: limit)
+    else
+      Result.new(success: false, error: 'Origem de vídeo inválida.')
+    end
+  end
+
+  # Facebook: `/{page_id}/videos`. Validado na API real — `reactions` e
+  # `comments_count` NÃO existem nessa aresta e derrubam a requisição
+  # inteira, então a lista de campos aqui é a que passou no teste.
+  def page_videos(page_id:, limit: 50)
+    result = get(
+      "/#{page_id}/videos",
+      fields: 'id,title,description,created_time,length,views_count,permalink_url,thumbnails{url,height,width}',
+      limit: limit
+    )
+    return result unless result.success
+
+    page = get("/#{page_id}", fields: 'name')
+    page_name = page.success ? page.data['name'] : nil
+
+    Result.new(
+      success: true,
+      data: result.data.map { |v| normalize_video(v, source: 'page', source_name: page_name) }
+    )
+  end
+
+  # Instagram: `/{ig_user_id}/media` traz as mídias do perfil profissional
+  # (Reels, posts, carrossel); filtramos por media_type=VIDEO que é o que
+  # serve de origem de público. O `media_product_type` distingue REELS de
+  # feed, e não existe aresta `/reels` na API.
+  def instagram_reels(ig_user_id:, limit: 50)
+    result = get(
+      "/#{ig_user_id}/media",
+      fields: 'id,caption,media_type,media_product_type,permalink,timestamp,like_count,comments_count,thumbnail_url',
+      limit: limit
+    )
+    return result unless result.success
+
+    Result.new(
+      success: true,
+      data: result.data.select { |m| m['media_type'].to_s.casecmp('video').zero? }
+             .map { |m| normalize_video(m, source: 'ig', source_name: nil) }
+    )
+  end
+
+  # Conta do Facebook conectada: `GET /me/videos` é a timeline da conta.
+  def account_videos(limit: 50)
+    result = get(
+      '/me/videos',
+      fields: 'id,title,description,created_time,length,views_count,permalink_url,thumbnails{url,height,width}',
+      limit: limit
+    )
+    return result unless result.success
+
+    Result.new(success: true, data: result.data.map { |v| normalize_video(v, source: 'conta', source_name: nil) })
+  end
+
+  # Normaliza vídeo de Página e vídeo de Instagram no mesmo formato, com a
+  # origem e as informações que a lista da UI mostra. Título vazio é comum
+  # (vídeo do Facebook sem descrição e Reels só com legenda), então a UI
+  # cai pra legenda/data em vez de mostrar linha em branco.
+  def normalize_video(video, source:, source_name:)
+    caption = video['caption'].presence || video['description'].presence
+    created = video['created_time'].presence || video['timestamp'].presence
+
+    {
+      'id' => video['id'],
+      'title' => video['title'].presence || caption,
+      'description' => video['description'].presence,
+      'caption' => caption,
+      'source' => source,
+      'source_name' => source_name,
+      'media_type' => video['media_product_type'].presence || video['media_type'].presence,
+      'created_time' => created,
+      'length' => video['length'],
+      'views_count' => video['views_count'],
+      'like_count' => video['like_count'],
+      'comments_count' => video['comments_count'],
+      'permalink_url' => video['permalink_url'].presence || video['permalink'].presence,
+      'thumbnail_url' => video.dig('thumbnails', 'data', 0, 'url').presence || video['thumbnail_url']
+    }
+  end
+
+  # BM dona de uma conta de anúncio. `?fields=owner` devolve `owner` como
+  # STRING (o id), não como objeto — usar dig('owner', 'id') estoura
+  # TypeError e derrubava a listagem de Páginas com 500.
+  def owning_business_of_ad_account(ad_account_id)
+    id = ad_account_id.to_s.delete_prefix('act_')
+    account = get("/act_#{id}", fields: 'owner')
+    return nil unless account.success
+
+    owner = account.data['owner']
+    owner.is_a?(Hash) ? owner['id'] : owner
   end
 
   # Perfil profissional do Instagram ligado a uma Página — é o `ig_user_id`
@@ -810,15 +961,25 @@ class Meta::AdsManagerService
   # nonexisting field", então tentamos a lista completa e caímos pra um mínimo
   # que ainda tem o `rule` (é dele que sai o tipo real do público) se a Meta
   # recusar.
+  # Cada campo desta lista foi testado um a um contra a Graph API real
+  # (GET /{id}?fields=X): a API responde 400 "(#100) Tried accessing
+  # nonexisting field" para um único campo desconhecido e ABORTA a leitura
+  # inteira. Foi por isso que duplicar na mesma conta não preenchia o
+  # formulário: bastava um destes campos não existir pro público inteiro
+  # falhar — e o fallback falhava pelo mesmo motivo. Não voltar a colocar
+  # campo aqui "porque parece que existe": `prefill`, `origin_audience_id`,
+  # `video_group_ids`, `facebook_page_id`, `creation_params`, `event_sources`,
+  # `video_id`, `app_id`, `ig_user_id` e `page_id` foram todos rejeitados.
+  # O id da origem do vídeo/página/app NÃO é legível — vem dentro da `rule`.
   AUDIENCE_DETAIL_FIELDS = %w[
-    id name subtype description retention_days prefill lookalike_spec
-    origin_audience_id pixel_id rule data_source data_source_types
-    video_group_ids facebook_page_id
+    id name subtype description retention_days lookalike_spec pixel_id
+    rule data_source data_source_types
     included_custom_audiences excluded_custom_audiences
+    account_id approximate_count_lower_bound delivery_status
   ].freeze
 
   AUDIENCE_DETAIL_FALLBACK_FIELDS =
-    'id,name,subtype,description,retention_days,lookalike_spec,rule,pixel_id,origin_audience_id'.freeze
+    'id,name,subtype,description,retention_days,lookalike_spec,rule,pixel_id'.freeze
 
   # Usado pelo "Duplicar público" pra preencher o formulário com os dados REAIS
   # do público de origem (tipo, pixel/página/app/vídeo de origem, retenção,
@@ -840,6 +1001,44 @@ class Meta::AdsManagerService
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
 
     get("/#{audience_id}", fields: 'id,name')
+  end
+
+  # Exclui um público. A exclusão é por NÓ (`DELETE /{audience_id}`) e não pela
+  # aresta da conta: `DELETE /act_{id}/customaudiences?audience_ids=[...]`
+  # responde "Unsupported delete request" mesmo com a conta e o token
+  # corretos — a aresta só aceita leitura. Um público por chamada, sem
+  # lote, pra nunca apagar mais do que a tela pediu.
+  #
+  # A exclusão é definitiva e não tem volta na Graph API: audiences de
+  # público salvos/lookalike somem e o histórico de veiculação do conjunto
+  # perde a referência. Por isso o nome é lido antes e devolvido no erro,
+  # pra UI poder nomear o que se está apagando.
+  def delete_audience(audience_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = audience_id.to_s.delete_prefix('act_')
+    return Result.new(success: false, error: 'Informe o público que deseja excluir.') if id.blank?
+
+    name = get("/#{id}", fields: 'id,name,subtype,lookalike_spec')
+    audience = name.success ? name.data : nil
+    unless audience
+      return Result.new(success: false, error: 'Público não encontrado na conta de anúncio (ou sem permissão para ele).')
+    end
+
+    if audience['lookalike_spec'].present?
+      return Result.new(
+        success: false,
+        error: 'Público semelhante não pode ser excluído pela API da Meta. Ele existe em função do público de origem.'
+      )
+    end
+
+    result = delete("/#{id}")
+    return result unless result.success
+
+    Result.new(
+      success: true,
+      data: { id: id, name: audience['name'], subtype: audience['subtype'], deleted: true }
+    )
   end
 
   # Monta a regra (rule) de um público a partir de uma fonte de evento. É o
@@ -1817,6 +2016,7 @@ class Meta::AdsManagerService
 
   # Ver comentário de `get` acima sobre `override_token` ser posicional.
   def post(path, body, override_token = nil)
+
     uri = URI("#{BASE_URL}#{path}")
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
@@ -1837,5 +2037,28 @@ class Meta::AdsManagerService
   rescue StandardError => e
     Rails.logger.error "Meta::AdsManagerService: POST #{path} error: #{e.message}"
     Result.new(success: false, error: 'Erro inesperado ao gravar na Graph API da Meta.')
+  end
+
+  # Só usado por `delete_audience`. Mesmo contrato de `get`/`post`.
+  def delete(path, override_token = nil)
+    uri = URI("#{BASE_URL}#{path}")
+    uri.query = URI.encode_www_form(access_token: override_token || @token)
+
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.read_timeout = 30
+
+    response = http.request(Net::HTTP::Delete.new(uri.request_uri))
+    parsed = JSON.parse(response.body)
+
+    unless response.code.to_i.between?(200, 299)
+      Rails.logger.error "Meta::AdsManagerService: DELETE #{path} -> #{response.code} #{response.body}"
+      return Result.new(success: false, error: parsed.dig('error', 'message') || 'Falha ao excluir na Graph API da Meta.')
+    end
+
+    Result.new(success: true, data: parsed)
+  rescue StandardError => e
+    Rails.logger.error "Meta::AdsManagerService: DELETE #{path} error: #{e.message}"
+    Result.new(success: false, error: 'Erro inesperado ao excluir na Graph API da Meta.')
   end
 end
