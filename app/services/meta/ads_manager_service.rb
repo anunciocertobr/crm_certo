@@ -559,6 +559,21 @@ class Meta::AdsManagerService
     end
   end
 
+  # A Meta recusa posicionamentos com códigos próprios (1815433 facebook,
+  # 1815508 instagram, 1815595 audience network, 1815336 combinação não
+  # aceita, 1885097 plataforma em publisher_platforms sem nenhuma posição) e
+  # todos são problemas de placement, não de público/orçamento — vale refazer
+  # sem as posições antes de desistir.
+  PLACEMENT_ERROR_CODES = %w[1815433 1815508 1815595 1815336 1885097].freeze
+
+  def placement_error?(error)
+    text = error.to_s
+    return false if text.blank?
+
+    PLACEMENT_ERROR_CODES.any? { |code| text.include?("código #{code}") } ||
+      text.include?('posicionamento') || text.include?('posições')
+  end
+
   # Mesmo raciocínio da campanha órfã, pro formulário de cadastro: ele é
   # criado ANTES da campanha (o anúncio precisa do `lead_gen_form_id`), então
   # uma falha depois deixava o formulário_ACTIVE e sem campanha no Gerenciador
@@ -588,7 +603,7 @@ class Meta::AdsManagerService
     promoted_object = promoted_object_for(act: act, campanha: adset_spec)
     return step_error(promoted_object, 'objeto promovido (pixel/página)') unless promoted_object.success
 
-    adset = post("/#{act}/adsets", {
+    adset_body = {
                     name: adset_spec['adset_name'],
                     status: adset_spec['adset_status'].presence || 'PAUSED',
                     campaign_id: campaign_id,
@@ -614,7 +629,27 @@ class Meta::AdsManagerService
                     promoted_object: promoted_object.data&.to_json,
                     targeting: targeting.data.to_json
                   }.merge(conversion_location_params(adset_spec))
-                  .compact)
+                  .compact
+
+    adset = post("/#{act}/adsets", adset_body)
+
+    # Posições são o pedaço mais volátil do payload: os valores aceitos mudam
+    # conforme o objetivo/meta de desempenho. Medido na conta real com a meta
+    # "Conversas" (WhatsApp), por exemplo, a Meta recusa `reels`, `stories`,
+    # `in_stream`, `right_column`, `inbox` e `brand_content` em
+    # `facebook_positions` (1815433), `feed`/`stories`/`in_stream` em
+    # `instagram_positions` (1815508) e quase toda a lista de Audience Network
+    # (1815595) — mas todos esses valores são legítimos em outros objetivos.
+    # Em vez de quebrar o cadastro por um campo que o usuário talvez nem tenha
+    # pensado, refazemos o conjunto SEM posições, que é o modo Advantage+ (o
+    # padrão da Meta e o que a campanha original da conta usa).
+    if !adset.success && placement_error?(adset.error)
+      fallback_targeting = (targeting.data || {}).except('publisher_platforms', 'facebook_positions',
+                                                         'instagram_positions', 'audience_network_positions')
+      Rails.logger.warn("Meta::AdsManagerService: posições recusadas (#{adset.error.to_s.gsub(/\s+/, ' ')[0, 160]}); refazendo o conjunto em Advantage+ (sem posições)")
+      adset = post("/#{act}/adsets", adset_body.merge(targeting: fallback_targeting.to_json))
+    end
+
     return step_error(adset, 'conjunto de anúncios') unless adset.success
 
     ads_specs = adset_spec['ads'].presence || [adset_spec]
@@ -1634,7 +1669,7 @@ class Meta::AdsManagerService
     promoted_object = promoted_object_for(act: act, campanha: campanha)
     return step_error(promoted_object, 'objeto promovido (pixel/página)') unless promoted_object.success
 
-    adset = post("/#{act}/adsets", {
+    adset_body = {
                     name: campanha['adset_name'],
                     status: campanha['adset_status'].presence || 'PAUSED',
                     campaign_id: campaign_id,
@@ -1648,7 +1683,19 @@ class Meta::AdsManagerService
                     # próprio formulário de cadastro, não uma URL/evento externo.
                     promoted_object: promoted_object.data&.to_json,
                     targeting: targeting.data.to_json
-                  }.compact)
+                  }.compact
+
+    adset = post("/#{act}/adsets", adset_body)
+    # Mesma resiliência de create_adset_with_ads: posição recusada pela Meta
+    # (1815433/1815508/1815595/1815336/1885097) não pode derrubar a duplicação
+    # de conjunto — refaz em Advantage+, sem posições.
+    if !adset.success && placement_error?(adset.error)
+      fallback_targeting = (targeting.data || {}).except('publisher_platforms', 'facebook_positions',
+                                                         'instagram_positions', 'audience_network_positions')
+      Rails.logger.warn("Meta::AdsManagerService: posições recusadas na duplicação de conjunto (#{adset.error.to_s.gsub(/\s+/, ' ')[0, 160]}); refazendo em Advantage+")
+      adset = post("/#{act}/adsets", adset_body.merge(targeting: fallback_targeting.to_json))
+    end
+
     return step_error(adset, 'conjunto de anúncios') unless adset.success
 
     ad = create_ad_only(act: act, adset_id: adset.data['id'], creative_id: creative.data['id'], campanha: campanha)
@@ -1903,13 +1950,30 @@ class Meta::AdsManagerService
 
     geo = geo.reject { |key, _value| key == 'location_types' }
 
-    new_geo = convert_pins_to_custom_locations(geo, 'cities', 'custom_locations')
-    # Exclusão de localizações: mesmo pin do mapa, mas no campo de exclusão
-    # (`excluded_geo_locations`) — é o que a Meta lê como "não anunciar
-    # aqui". Sem converter, o pin com key=custom_location_pin é recusado.
-    new_geo = convert_pins_to_custom_locations(new_geo, 'excluded_cities', 'excluded_geo_locations')
+    result = targeting.merge('geo_locations' => convert_pins_to_custom_locations(geo, 'cities', 'custom_locations'))
+    # Exclusão de localizações: testado na conta real, a normalização nova da
+    # Meta NÃO aceita exclusão dentro de `geo_locations` (`excluded_cities`,
+    # `excluded_countries` e `excluded_geo_locations` voltam com o subcode
+    # 1487079, "Normalization does not allow the value ..."). O que ela aceita
+    # é `excluded_custom_locations` / `excluded_countries` / `excluded_regions`
+    # na RAIZ do targeting. Então os pins de exclusão sobem convertidos para
+    # `excluded_custom_locations`, e não para dentro do geo.
+    excluidos = geo['excluded_cities']
+    if excluidos.is_a?(Array)
+      result['excluded_custom_locations'] = (result['excluded_custom_locations'] || []) + pins_to_locations(excluidos)
+      result = result.merge('geo_locations' => result['geo_locations'].except('excluded_cities'))
+    end
 
-    targeting.merge('geo_locations' => new_geo)
+    result
+  end
+
+  # Pins do mapa (`key = 'custom_location_pin'`) no formato de localização que
+  # a Graph API entende.
+  def pins_to_locations(pins)
+    pins.map do |pin|
+      { 'latitude' => pin['latitude'], 'longitude' => pin['longitude'],
+        'radius' => pin['radius'], 'distance_unit' => pin['distance_unit'] || 'kilometer' }
+    end
   end
 
   # Move os pins do mapa (`key = 'custom_location_pin'`) do campo de origem
@@ -1922,10 +1986,7 @@ class Meta::AdsManagerService
     pins, real_cities = geo[from_key].partition { |c| c['key'] == 'custom_location_pin' }
     return geo if pins.empty?
 
-    converted = geo.merge(to_key => (geo[to_key] || []) + pins.map do |pin|
-      { 'latitude' => pin['latitude'], 'longitude' => pin['longitude'],
-        'radius' => pin['radius'], 'distance_unit' => pin['distance_unit'] || 'kilometer' }
-    end)
+    converted = geo.merge(to_key => (geo[to_key] || []) + pins_to_locations(pins))
     # `Hash#delete` devolve o valor removido — daí o `dup` + delete separado.
     return converted.except(from_key) if real_cities.empty?
 
@@ -2114,8 +2175,40 @@ class Meta::AdsManagerService
     campanha['optimization_goal'].to_s.include?('CONVERSATIONS')
   end
 
+  # A META DE DESEMPENHO do conjunto é o que manda, não o objetivo. Campanha de
+  # Leads com meta "Conversas" (WhatsApp/Messenger) NÃO cria formulário — se o
+  # objetivo decidisse sozinho, duplicar uma campanha de cadastro pra conversa
+  # saía tentando criar o formulário e morria com o subcode 1892019 ("o nome
+  # do formulário já existe") ou 1815089 (Termos de Serviço da Página).
+  #
+  # Detalhe que importa: numa campanha nova a meta NÃO está no nível da
+  # campanha, está em cada conjunto (`adsets[].optimization_goal`, e até em
+  # `adsets[].ads[].optimization_goal` no formato antigo achatado). Por isso a
+  # função olha essas camadas antes de qualquer coisa, e o objetivo só entra
+  # como reserva quando nenhuma meta foi declarada.
   def lead_flow?(campanha)
-    campanha['optimization_goal'].to_s == 'LEAD_GENERATION' || campanha['objective'].to_s == 'OUTCOME_LEADS'
+    goals = declared_optimization_goals(campanha)
+    return goals.any? { |goal| goal == 'LEAD_GENERATION' } if goals.any?
+
+    campanha['objective'].to_s == 'OUTCOME_LEADS'
+  end
+
+  # Todas as metas declaradas no payload, das camadas mais internas para a
+  # mais externa. Vazio significa "ninguém disse qual é a meta".
+  def declared_optimization_goals(campanha)
+    specs = campanha['adsets'].presence
+    goals =
+      if specs
+        specs.flat_map do |spec|
+          ads = spec['ads'].presence
+          nested = ads ? ads.map { |ad| ad['optimization_goal'] } : []
+          [spec['optimization_goal'], *nested]
+        end
+      else
+        [campanha['optimization_goal']]
+      end
+
+    goals.compact.map(&:to_s).reject(&:empty?)
   end
 
   def instagram_profile_flow?(campanha)
