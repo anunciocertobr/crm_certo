@@ -1779,6 +1779,22 @@ class Meta::AdsManagerService
     fetch_external_asset(normalize_public_url(url))
   end
 
+  # "Duplicar" no painel abre a tela de criação já preenchida com os dados da
+  # campanha de origem. A mídia do anúncio original não volta pro navegador
+  # como arquivo (o `adcreative` do painel só traz `image_url`/`video_id`, e
+  # vídeo da Meta só tem URL de download via API), então o front manda o
+  # `ad_id_origem` e a gente resolve a URL do criativo aqui — tanto imagem
+  # quanto vídeo, pelo mesmo caminho da duplicação.
+  def resolve_asset_from_source_ad(ad_id_origem)
+    criativo = get("/#{ad_id_origem}", fields: 'creative{image_url,thumbnail_url,video_id,object_story_spec}')
+    return step_error(criativo, 'anúncio de origem (criativo)') unless criativo.success
+
+    url = resolve_creative_source_asset(criativo.data.to_h['creative'])
+    return Result.new(success: false, error: 'Não encontrei imagem nem vídeo no anúncio de origem pra reaproveitar.') if url.blank?
+
+    fetch_external_asset(normalize_public_url(url))
+  end
+
   # Links de compartilhamento do Dropbox (`dl=0`) devolvem uma página HTML de
   # preview, não o arquivo — `dl=1` força o download direto. Outros hosts
   # passam sem alteração.
@@ -1972,9 +1988,12 @@ class Meta::AdsManagerService
   def build_creative(act:, campanha:, lead_form_id: nil)
     return build_carousel_creative(act: act, campanha: campanha) if campanha['carousel_items'].is_a?(Array) && campanha['carousel_items'].any?
 
-    asset = resolve_asset(campanha)
+    if campanha['ad_id_origem'].present?
+      asset = resolve_asset_from_source_ad(campanha['ad_id_origem'])
+    else
+      asset = resolve_asset(campanha)
+    end
     return asset unless asset.success
-
     base64, mimetype = asset.data
     page_id = page_id_for(campanha)
     # Precisa bater com o `destination_type` do adset (ver create_campaign_full)
