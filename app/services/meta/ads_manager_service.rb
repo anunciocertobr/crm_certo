@@ -1903,24 +1903,33 @@ class Meta::AdsManagerService
 
     geo = geo.reject { |key, _value| key == 'location_types' }
 
-    return targeting.merge('geo_locations' => geo) unless geo['cities'].is_a?(Array)
-
-    pins, real_cities = geo['cities'].partition { |c| c['key'] == 'custom_location_pin' }
-    return targeting.merge('geo_locations' => geo) if pins.empty?
-
-    custom_locations = pins.map do |pin|
-      { 'latitude' => pin['latitude'], 'longitude' => pin['longitude'],
-        'radius' => pin['radius'], 'distance_unit' => pin['distance_unit'] || 'kilometer' }
-    end
-
-    new_geo = geo.merge('custom_locations' => (geo['custom_locations'] || []) + custom_locations)
-    if real_cities.empty?
-      new_geo.delete('cities')
-    else
-      new_geo['cities'] = real_cities
-    end
+    new_geo = convert_pins_to_custom_locations(geo, 'cities', 'custom_locations')
+    # Exclusão de localizações: mesmo pin do mapa, mas no campo de exclusão
+    # (`excluded_geo_locations`) — é o que a Meta lê como "não anunciar
+    # aqui". Sem converter, o pin com key=custom_location_pin é recusado.
+    new_geo = convert_pins_to_custom_locations(new_geo, 'excluded_cities', 'excluded_geo_locations')
 
     targeting.merge('geo_locations' => new_geo)
+  end
+
+  # Move os pins do mapa (`key = 'custom_location_pin'`) do campo de origem
+  # para o campo que a Graph API entende (`custom_locations` na inclusão,
+  # `excluded_geo_locations` na exclusão), preservando as cidades reais que o
+  # modal mandou junto.
+  def convert_pins_to_custom_locations(geo, from_key, to_key)
+    return geo unless geo[from_key].is_a?(Array)
+
+    pins, real_cities = geo[from_key].partition { |c| c['key'] == 'custom_location_pin' }
+    return geo if pins.empty?
+
+    converted = geo.merge(to_key => (geo[to_key] || []) + pins.map do |pin|
+      { 'latitude' => pin['latitude'], 'longitude' => pin['longitude'],
+        'radius' => pin['radius'], 'distance_unit' => pin['distance_unit'] || 'kilometer' }
+    end)
+    # `Hash#delete` devolve o valor removido — daí o `dup` + delete separado.
+    return converted.except(from_key) if real_cities.empty?
+
+    converted.merge(from_key => real_cities)
   end
 
   # `custom_audience_id`/`saved_audience_name` no modal são um campo de texto
@@ -2041,12 +2050,16 @@ class Meta::AdsManagerService
                        image_hash: image_hash,
                        message: campanha['body'],
                        name: campanha['title'],
+                       # A descrição do anúncio só existe em `link_data` (o
+                       # `video_data` da Graph API não tem esse campo) e é o
+                       # texto de apoio que aparece abaixo do link no feed.
+                       description: campanha['description'].presence,
                        # O modal não tem campo de link de destino (foi desenhado só pra
                        # mensagens) — quando vier um `link` de verdade (campanha de
                        # site/tráfego), usa ele; senão cai na própria Página como antes.
                        link: campanha['link'].presence || "https://www.facebook.com/#{page_id}",
                        call_to_action: cta
-                     }
+                     }.compact
                    }
                  end
 
