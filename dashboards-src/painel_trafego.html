@@ -2502,7 +2502,19 @@
                 const payload = { email: state.email, password: state.password, pagina: pageName, acao: action, ...data, };
                 try {
                     const response = await fetch(webhookUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                    if (!response.ok) { throw new Error(`Status: ${response.status}`); }
+                    // O backend responde 502 com o erro real da Meta no corpo
+                    // ({ error: { code, message } }). Sem ler o corpo antes de
+                    // lançar, TODA falha virava "Status: 502" — o usuário não
+                    // tinha como saber a causa (ex.: "Página não aceitou os
+                    // Termos de Serviço de Geração de Cadastros").
+                    if (!response.ok) {
+                        let serverMessage = '';
+                        try {
+                            const errBody = await response.json();
+                            serverMessage = errBody?.error?.message || errBody?.message || (errBody?.error ? JSON.stringify(errBody.error) : '');
+                        } catch (e) { /* corpo não é JSON: mantém só o status */ }
+                        throw new Error(serverMessage || `Status: ${response.status}`);
+                    }
                     let responseData;
                     try { responseData = await response.json(); } catch (e) { throw new Error(`Erro ao processar resposta JSON. A resposta estava vazia ou malformada. Detalhes: ${e.message}`); }
                     
