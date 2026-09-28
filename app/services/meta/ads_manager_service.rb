@@ -414,7 +414,7 @@ class Meta::AdsManagerService
   # o resto falhar, então não há gasto — só sujeira pra apagar manualmente).
   def create_campaign_full(ad_account_id:, campanha:)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
-    return Result.new(success: false, error: 'Página do Facebook sem page_id configurado (necessário pro criativo).') if @page&.page_id.blank?
+    return Result.new(success: false, error: 'Página do Facebook sem page_id configurado (necessário pro criativo).') if page_id_for(campanha).blank?
 
     act = "act_#{ad_account_id}"
 
@@ -426,16 +426,28 @@ class Meta::AdsManagerService
       lead_form_id = lead_form.data['id']
     end
 
+    # Orçamento no nível da CAMPANHA (CBO) é opt-in: só entra quando o front
+    # manda `campaign_daily_budget`. Sem ele, cada conjunto carrega o seu
+    # `daily_budget`.
+    #
+    # O `is_adset_budget_sharing_enabled: false` é obrigatório nos DOIS casos:
+    # (a) orçamento por conjunto sem ele a Graph API recusa com subcode
+    # 4834011, e (b) com CBO o flag ligado é recusado com 4834002 ("não pode
+    # usar compartilhamento de orçamento do conjunto com o orçamento da
+    # campanha"). O que faz a Meta dividir o CBO entre os conjuntos é ela
+    # mesma, não esse flag.
+    campaign_budget = campanha['campaign_daily_budget'].presence
+    adset_budget_shared = campaign_budget.blank?
+
     campaign = post("/#{act}/campaigns", {
                        name: campanha['name'],
                        status: campanha['status'].presence || 'PAUSED',
                        objective: campanha['objective'],
                        special_ad_categories: [].to_json,
-                       # Exigido pela API quando o orçamento é definido no conjunto de
-                       # anúncios (como aqui), não na campanha (CBO) — sem isso a Graph
-                       # API recusa a criação com "Invalid parameter" (subcode 4834011).
                        is_adset_budget_sharing_enabled: false
-                     })
+                     }.tap do |body|
+      body[:daily_budget] = campaign_budget if campaign_budget
+    end)
     return step_error(campaign, 'campanha') unless campaign.success
 
     # `adsets` (novo): array de conjuntos, cada um com seu próprio `ads` —
@@ -446,6 +458,13 @@ class Meta::AdsManagerService
     # anúncio só, campos direto em `campanha`) — mantém compatibilidade
     # total com duplicate_adset_to_campaign, que só sabe montar esse formato.
     adsets_specs = campanha['adsets'].presence || [campanha]
+    # CBO: o dinheiro é dividido pelo próprio Meta, então o conjunto não pode
+    # mandar orçamento junto (a Meta usa o do conjunto e ignora o da campanha).
+    if !adset_budget_shared
+      adsets_specs = adsets_specs.map { |spec| adset_budget_shared ? spec : spec.except('daily_budget') }
+      cbo_check = check_bid_amount_for_cbo(adsets_specs)
+      return Result.new(success: false, error: cbo_check) if cbo_check
+    end
 
     created_adsets = []
     adsets_specs.each do |adset_spec|
@@ -458,7 +477,7 @@ class Meta::AdsManagerService
         # então deletar o que este mesmo fluxo criou é seguro.
         return result.tap do
           discard_orphan_campaign(campaign.data['id'])
-          discard_orphan_lead_form(lead_form_id)
+          discard_orphan_lead_form(lead_form_id, campanha)
         end
       end
 
@@ -488,10 +507,10 @@ class Meta::AdsManagerService
   # — aparecia na lista de formulários da Página como lixo. A Meta não aceita
   # DELETE em leadgen_forms, mas aceita arquivar (`status=ARCHIVED` no próprio
   # nó), que é o mesmo que o Gerenciador faz.
-  def discard_orphan_lead_form(lead_form_id)
+  def discard_orphan_lead_form(lead_form_id, campanha = {})
     return if lead_form_id.blank?
 
-    result = post("/#{lead_form_id}", { status: 'ARCHIVED' }, @page&.page_access_token)
+    result = post("/#{lead_form_id}", { status: 'ARCHIVED' }, page_token_for(campanha))
     if result.success
       Rails.logger.info "Meta::AdsManagerService: formulário de lead órfão #{lead_form_id} arquivado após falha no fluxo"
     else
@@ -518,11 +537,18 @@ class Meta::AdsManagerService
                     daily_budget: adset_spec['daily_budget'],
                     optimization_goal: adset_spec['optimization_goal'],
                     bid_strategy: adset_spec['bid_strategy'],
+                    # Com CBO a Meta troca a estratégia para
+                    # LOWEST_COST_WITH_BID_CAP e aí o `bid_amount` passa a ser
+                    # obrigatório (subcode 1815857). A Graph API exige o valor
+                    # em CENTAVOS e como INTEIRO — mandar "15.00" volta
+                    # "Param bid_amount must be an integer" (código 100).
+                    bid_amount: bid_amount_for(adset_spec),
                     billing_event: 'IMPRESSIONS',
                     destination_type: destination_type_for(adset_spec),
                     promoted_object: promoted_object.data&.to_json,
                     targeting: targeting.data.to_json
-                  }.compact)
+                  }.merge(conversion_location_params(adset_spec))
+                  .compact)
     return step_error(adset, 'conjunto de anúncios') unless adset.success
 
     ads_specs = adset_spec['ads'].presence || [adset_spec]
@@ -594,7 +620,7 @@ class Meta::AdsManagerService
 
     create_adset_and_ad(act: act, campaign_id: target_campaign_id, campanha: campanha, lead_form_id: lead_form_id)
       .tap do |result|
-        discard_orphan_lead_form(lead_form_id) unless result.success
+        discard_orphan_lead_form(lead_form_id, campanha) unless result.success
       end
   end
 
@@ -640,12 +666,12 @@ class Meta::AdsManagerService
 
     creative = build_creative(act: act, campanha: campanha, lead_form_id: lead_form_id)
     unless creative.success
-      discard_orphan_lead_form(lead_form_id)
+      discard_orphan_lead_form(lead_form_id, campanha)
       return step_error(creative, 'criativo')
     end
 
     create_ad_only(act: act, adset_id: target_adset_id, creative_id: creative.data['id'], campanha: campanha)
-      .tap { |result| discard_orphan_lead_form(lead_form_id) unless result.success }
+      .tap { |result| discard_orphan_lead_form(lead_form_id, campanha) unless result.success }
   end
 
   # --- Aba "Criação Meta" (Marketing) — formulários de lead avulsos e
@@ -1386,6 +1412,39 @@ class Meta::AdsManagerService
 
   private
 
+  # Página da campanha. Antes era sempre `Channel::FacebookPage.first` — a
+  # única página do banco —, o que impedia rodar a mesma estrutura de
+  # campanha em páginas diferentes. Agora a campanha/conjunto pode trazer seu
+  # próprio `page_id` (o seletor do painel manda o da página escolhida) e, sem
+  # ele, cai na página conectada para não mudar o comportamento de quem não
+  # escolhe nada.
+  def page_id_for(campanha)
+    campanha['page_id'].presence || @page&.page_id
+  end
+
+  # Token da página escolhida. A página do banco já tem o token guardado (nada
+  # de ida à Graph API); qualquer outra tem o token buscado sob demanda, que é
+  # o mesmo caminho que a aba de Formulários já usava.
+  def page_token_for(campanha)
+    page_id = page_id_for(campanha)
+    return @page&.page_access_token if page_id.present? && page_id == @page&.page_id
+    return nil if page_id.blank?
+
+    resolve_page_token(page_id).data
+  end
+
+  # Instagram da página escolhida — o `promoted_object` de "visita ao perfil"
+  # precisa do `instagram_actor_id` DA PÁGINA QUE ESTÁ RODANDO, não o da página
+  # do banco. Só busca na Graph API quando a escolha é outra página, porque é
+  # essa consulta que custa uma ida ao servidor.
+  def instagram_id_for(campanha)
+    page_id = page_id_for(campanha)
+    return @page&.instagram_id if page_id.blank? || page_id == @page&.page_id
+
+    result = get("/#{page_id}", fields: 'instagram_business_account{id}')
+    result.success ? result.data.dig('instagram_business_account', 'id') : nil
+  end
+
   def resolve_page_token(page_id)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
     return Result.new(success: false, error: 'Selecione uma Página.') if page_id.blank?
@@ -1748,12 +1807,24 @@ class Meta::AdsManagerService
   # `geo_locations.cities[].key = 'custom_location_pin'` — formato que nunca
   # existiu de verdade na Graph API (a chave certa pra pin é
   # `geo_locations.custom_locations[]`, sem key/name).
+  # `location_types` virou campo obsoleto na Graph API: a Meta passou a
+  # aceitar a cidade/país/raio direto em `geo_locations` e RECUSA o array
+  # antigo com o subcode 1870199 — "Agora todo o direcionamento por
+  # localização alcançará pessoas que moram ou estiveram recentemente nas
+  # localizações selecionadas. Remova todos os valores do campo
+  # location_types". Não é opcional: enviar `['cities']` quebra TODA criação
+  # de conjunto vinda do painel. A solução é não mandar o campo — a Meta
+  # assume o papel de "moram ou estiveram recentemente" por conta própria.
   def normalize_geo(targeting)
     geo = targeting['geo_locations']
-    return targeting unless geo.is_a?(Hash) && geo['cities'].is_a?(Array)
+    return targeting unless geo.is_a?(Hash)
+
+    geo = geo.reject { |key, _value| key == 'location_types' }
+
+    return targeting.merge('geo_locations' => geo) unless geo['cities'].is_a?(Array)
 
     pins, real_cities = geo['cities'].partition { |c| c['key'] == 'custom_location_pin' }
-    return targeting if pins.empty?
+    return targeting.merge('geo_locations' => geo) if pins.empty?
 
     custom_locations = pins.map do |pin|
       { 'latitude' => pin['latitude'], 'longitude' => pin['longitude'],
@@ -1839,7 +1910,7 @@ class Meta::AdsManagerService
     return asset unless asset.success
 
     base64, mimetype = asset.data
-    page_id = @page&.page_id
+    page_id = page_id_for(campanha)
     # Precisa bater com o `destination_type` do adset (ver create_campaign_full)
     # — MESSAGE_PAGE sem isso, ou com um app_destination diferente do adset,
     # é a causa exata do "Incompatibilidade entre criativo e objetivo". O
@@ -1848,7 +1919,7 @@ class Meta::AdsManagerService
     cta = if lead_form_id.present?
             { type: 'SIGN_UP', value: { lead_gen_form_id: lead_form_id } }
           elsif messaging_flow?(campanha)
-            { type: 'MESSAGE_PAGE', value: { app_destination: 'MESSENGER' } }
+            messaging_cta(campanha)
           else
             { type: 'LEARN_MORE' }
           end
@@ -1904,8 +1975,8 @@ class Meta::AdsManagerService
   # como imagem separada (mesmo endpoint `bytes` do criativo de imagem
   # única) antes de montar o `child_attachments`.
   def build_carousel_creative(act:, campanha:)
-    page_id = @page&.page_id
-    cta = messaging_flow?(campanha) ? { type: 'MESSAGE_PAGE', value: { app_destination: 'MESSENGER' } } : { type: 'LEARN_MORE' }
+    page_id = page_id_for(campanha)
+    cta = messaging_flow?(campanha) ? messaging_cta(campanha) : { type: 'LEARN_MORE' }
     default_link = campanha['link'].presence || "https://www.facebook.com/#{page_id}"
 
     child_attachments = campanha['carousel_items'].map do |item|
@@ -1959,9 +2030,11 @@ class Meta::AdsManagerService
 
   def promoted_object_for(act:, campanha:)
     if lead_flow?(campanha)
-      Result.new(success: true, data: { page_id: @page&.page_id })
+      Result.new(success: true, data: { page_id: page_id_for(campanha) })
     elsif instagram_profile_flow?(campanha)
-      Result.new(success: true, data: { page_id: @page&.page_id, instagram_actor_id: @page&.instagram_id })
+      Result.new(success: true, data: { page_id: page_id_for(campanha), instagram_actor_id: instagram_id_for(campanha) })
+    elsif messaging_flow?(campanha)
+      Result.new(success: true, data: messaging_promoted_object(campanha))
     elsif conversion_flow?(campanha)
       pixel_id = campanha['pixel_id'].presence || resolve_default_pixel_id(act: act)
       return Result.new(success: false, error: 'Nenhum pixel encontrado na conta pra usar como evento de conversão.') if pixel_id.blank?
@@ -1991,13 +2064,134 @@ class Meta::AdsManagerService
     Digest::SHA256.hexdigest(value)
   end
 
-  # ON_AD: o formulário abre dentro do próprio anúncio (Instant Form) — é o
+  # `ON_AD`: o formulário abre dentro do próprio anúncio (Instant Form) — é o
   # único destino que a Graph API aceita pra criativo com lead_gen_form_id.
   def destination_type_for(campanha)
     return 'ON_AD' if lead_flow?(campanha)
-    return 'MESSENGER' if messaging_flow?(campanha)
+    return mensagem_destination_type(campanha) if messaging_flow?(campanha)
 
     nil
+  end
+
+  # `ON_AD`: o formulário abre dentro do próprio anúncio (Instant Form) — é o
+  # único destino que a Graph API aceita pra criativo com lead_gen_form_id.
+  #
+  # Mensagens têm VÁRIOS destinos e cada um precisa de um par diferente entre
+  # o conjunto (`destination_type`), o `promoted_object` e o CTA do criativo —
+  # é a causa exata do "Incompatibilidade entre criativo e objetivo" quando os
+  # três não batem. Messenger é o padrão; WhatsApp precisa do número, e
+  # Direct/Instagram precisam do perfil da página.
+  def mensagem_destination_type(campanha)
+    case campanha['mensagem_destino'].presence || 'MESSENGER'
+    when 'WHATSAPP' then 'WHATSAPP'
+    when 'INSTAGRAM' then 'INSTAGRAM'
+    when 'MESSENGER' then 'MESSENGER'
+    else 'MESSENGER'
+    end
+  end
+
+  # `object_story_spec` do conjunto de mensagens. O WhatsApp precisa do
+  # `whatsapp_phone_number` (sem ele a Meta recusa o conjunto) e o Direct
+  # precisa do `instagram_actor_id` — o mesmo perfil que o CTA do criativo
+  # vai usar, senão os dois lados apontam pra destinos diferentes.
+  def messaging_promoted_object(campanha)
+    case mensagem_destination_type(campanha)
+    when 'WHATSAPP'
+      phone = campanha['whatsapp_phone_number'].presence
+      return { page_id: page_id_for(campanha), smart_pse_enabled: false, whatsapp_phone_number: phone } if phone.present?
+
+      { page_id: page_id_for(campanha) }
+    when 'INSTAGRAM'
+      { page_id: page_id_for(campanha), instagram_actor_id: instagram_id_for(campanha) }.compact
+    else
+      { page_id: page_id_for(campanha) }
+    end
+  end
+
+  # CTA do criativo de mensagens, casando com o `destination_type` do
+  # conjunto. Messenger e WhatsApp usam MESSAGE_PAGE; Direct/Instagram usam
+  # MESSAGE_PAGE também, mas com o perfil da página no `instagram_actor_id`.
+  def messaging_cta(campanha)
+    case mensagem_destination_type(campanha)
+    when 'WHATSAPP'
+      { type: 'WHATSAPP_MESSAGE', value: { app_destination: 'WHATSAPP', link: 'https://api.whatsapp.com/send' } }
+    when 'INSTAGRAM'
+      actor = instagram_id_for(campanha)
+      value = { app_destination: 'MESSENGER', link: "https://m.me/#{page_id_for(campanha)}" }
+      value[:instagram_actor_id] = actor if actor.present?
+      { type: 'MESSAGE_PAGE', value: value }
+    else
+      { type: 'MESSAGE_PAGE', value: { app_destination: 'MESSENGER' } }
+    end
+  end
+
+  # Com CBO a Meta NÃO aceita `LOWEST_COST_WITHOUT_CAP`: ela troca a estratégia
+  # para `LOWEST_COST_WITH_BID_CAP` e passa a exigir `bid_amount` (subcode
+  # 1815857). Sem teto definido o Gerenciador da Meta pede o valor, então aqui
+  # a gente troca a estratégia quando há valor e devolve um erro legível
+  # quando não há — melhor que o erro cru da Meta, que só aparece depois de a
+  # campanha já ter sido criada.
+  def check_bid_amount_for_cbo(adsets_specs)
+    sem_teto = adsets_specs.select { |spec| spec['bid_strategy'].to_s.in?(['', 'LOWEST_COST_WITHOUT_CAP']) }
+    return nil if sem_teto.empty?
+
+    sem_teto.each do |spec|
+      next if bid_amount_cents(spec['bid_amount'])
+
+      return 'Com o orçamento na campanha (CBO) a Meta exige um limite de lance por conjunto. ' \
+             "Informe o limite de lance do conjunto \"#{spec['adset_name']}\" (ou volte o orçamento para o conjunto)."
+    end
+
+    adsets_specs.map! do |spec|
+      if spec['bid_strategy'].to_s.in?(['', 'LOWEST_COST_WITHOUT_CAP'])
+        spec.merge('bid_strategy' => 'LOWEST_COST_WITH_BID_CAP')
+      else
+        spec
+      end
+    end
+    nil
+  end
+
+  # `bid_amount` (limite de lance / custo-alvo) é o único campo de orçamento da
+  # Graph API que vem em CENTAVOS e como inteiro. O front sempre manda no
+  # formato de exibição (R$ 15,00); converter aqui evita o "Param bid_amount
+  # must be an integer" que a Meta devolve cru.
+  def bid_amount_cents(value)
+    return nil if value.blank?
+
+    cents = (value.to_s.tr(',', '.').to_f * 100).round
+    cents.positive? ? cents : nil
+  end
+
+  # Só manda `bid_amount` quando a estratégia de lance aceita um: com
+  # LOWEST_COST_WITHOUT_CAP a Meta recusa com 1815858 ("você não pode definir
+  # um limite de lance para conjuntos com LOWEST_COST_WITHOUT_CAP"). É
+  # exatamente o caso padrão do painel, então enviar o campo sempre quebraria
+  # toda criação.
+  def bid_amount_for(adset_spec)
+    strategy = adset_spec['bid_strategy'].to_s
+    return nil unless strategy.in?(%w[LOWEST_COST_WITH_BID_CAP TARGET_COST COST_CAP])
+
+    bid_amount_cents(adset_spec['bid_amount'])
+  end
+
+  # `conversion_location` é o "local de conversão" do conjunto: site próprio
+  # (URL) ou app. A Meta só aceita o campo em conjunto de objetivo de conversão,
+  # então fica fora dos outros (enviar junto é o que faz a API recusar com
+  # "Invalid parameter").
+  def conversion_location_params(campanha)
+    return {} unless conversion_flow?(campanha)
+
+    event = campanha['conversion_event'].presence || 'PURCHASE'
+    if campanha['conversion_location'].present?
+      { 'conversion_location' => { 'conversion_type' => 'website', 'url' => campanha['conversion_location'],
+                                   'event_type' => event }.to_json }
+    elsif campanha['conversion_app'].present?
+      { 'conversion_location' => { 'conversion_type' => 'app', 'app_id' => campanha['conversion_app'],
+                                   'event_type' => event }.to_json }
+    else
+      {}
+    end
   end
 
   # Formulário de cadastro (Lead Ad / "Instant Form") — precisa existir
@@ -2017,14 +2211,14 @@ class Meta::AdsManagerService
     # campanha para Leads duas vezes, ou reexecutar a criação, batia sempre
     # na segunda. Tenta o nome pedido e, se colidir, acresenta um contador.
     result = post(
-      "/#{@page&.page_id}/leadgen_forms",
+      "/#{page_id_for(campanha)}/leadgen_forms",
       {
         name: base_name,
         questions: questions.to_json,
         privacy_policy: { url: privacy_url, link_text: 'Política de Privacidade' }.to_json,
-        follow_up_action_url: campanha['follow_up_action_url'].presence || "https://www.facebook.com/#{@page&.page_id}"
+        follow_up_action_url: campanha['follow_up_action_url'].presence || "https://www.facebook.com/#{page_id_for(campanha)}"
       },
-      @page&.page_access_token
+      page_token_for(campanha)
     )
     return result if result.success
 
@@ -2033,14 +2227,14 @@ class Meta::AdsManagerService
 
     2.upto(4) do |n|
       retry_result = post(
-        "/#{@page&.page_id}/leadgen_forms",
+        "/#{page_id_for(campanha)}/leadgen_forms",
         {
           name: "#{base_name} (#{n})",
           questions: questions.to_json,
           privacy_policy: { url: privacy_url, link_text: 'Política de Privacidade' }.to_json,
-          follow_up_action_url: campanha['follow_up_action_url'].presence || "https://www.facebook.com/#{@page&.page_id}"
+          follow_up_action_url: campanha['follow_up_action_url'].presence || "https://www.facebook.com/#{page_id_for(campanha)}"
         },
-        @page&.page_access_token
+        page_token_for(campanha)
       )
       return retry_result if retry_result.success
     end
