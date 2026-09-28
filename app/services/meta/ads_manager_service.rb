@@ -196,13 +196,62 @@ class Meta::AdsManagerService
     Result.new(success: true, data: [{ 'lista_bms' => result.data }])
   end
 
+  # Números de WhatsApp que esta conta de anúncios já usa, para a página
+  # escolhida — é o que o painel oferece no seletor quando o destino da
+  # conversa é WhatsApp.
+  #
+  # NÃO dá pra ler a WABA direto: `/{page}/whatsapp_business_accounts`,
+  # `/{page}/owned_whatsapp_business_accounts`, `/{waba}/phone_numbers` e
+  # `/me/owned_whatsapp_business_accounts` são todos recusados pelo token de
+  # Página com "Tried accessing nonexisting field" — eles exigem token de
+  # negócio com o escopo `whatsapp_business_management`, que a integração não
+  # tem. A saída é ler os próprios conjuntos da conta: todo conjunto de
+  # WhatsApp publicado carrega `promoted_object.whatsapp_phone_number` (e o
+  # `whatsapp_business_account_data.waba_id` que a Meta resolve sozinha), então
+  # os números que a conta consegue usar são exatamente esses.
+  def whatsapp_numbers_for_page(page_id:, ad_account_id: nil)
+    page_id = page_id.to_s
+    return Result.new(success: false, error: 'Escolha a página para listar os números de WhatsApp.') if page_id.blank?
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    account = ad_account_id.to_s.delete_prefix('act_')
+    return Result.new(success: false, error: 'Escolha a conta de anúncios para listar os números.') if account.blank?
+
+    # O `promoted_object` da campanha também vale: campanha de leads/WhatsApp
+    # costuma ter o objeto promovido no nível da campanha, não do conjunto.
+    found = []
+    ["/act_#{account}/adsets", "/act_#{account}/campaigns"].each do |path|
+      listing = get(path, { fields: 'id,name,promoted_object', limit: 200 })
+      next unless listing.success
+
+      Array(listing.data).each do |node|
+        promoted = node['promoted_object']
+        next unless promoted.is_a?(Hash)
+        next if promoted['page_id'].present? && promoted['page_id'].to_s != page_id
+        next if promoted['whatsapp_phone_number'].blank?
+
+        waba = promoted['whatsapp_business_account_data'] || promoted['whatsapp_business_account'] || {}
+        found << {
+          'phone_number' => promoted['whatsapp_phone_number'].to_s,
+          'waba_id' => waba.is_a?(Hash) ? (waba['waba_id'].presence || waba['id']) : nil,
+          'source' => node['name']
+        }
+      end
+    end
+
+    numbers = found.uniq { |n| n['phone_number'] }
+    # Lista vazia é resposta válida: a UI avisa que não há histórico de
+    # WhatsApp na conta e deixa o campo aceitar digitação.
+    Result.new(success: true, data: numbers)
+  end
+
   def campaigns_tree(ad_account_id:, date_start:, date_stop:)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
 
     structural = get(
       "/act_#{ad_account_id}/campaigns",
-      fields: 'id,name,status,objective,' \
-              'adsets{name,status,daily_budget,targeting,promoted_object,start_time,end_time,' \
+      fields: 'id,name,status,objective,description,' \
+              'adsets{name,status,description,daily_budget,lifetime_budget,targeting,promoted_object,start_time,end_time,' \
               'optimization_goal,bid_strategy,ads{name,status,adcreative{name,body,title,image_url,video_id}}}',
       limit: 200
     )
@@ -461,7 +510,10 @@ class Meta::AdsManagerService
     # CBO: o dinheiro é dividido pelo próprio Meta, então o conjunto não pode
     # mandar orçamento junto (a Meta usa o do conjunto e ignora o da campanha).
     if !adset_budget_shared
-      adsets_specs = adsets_specs.map { |spec| spec.except('daily_budget') }
+      # CBO é sempre diário: a Meta recusa `lifetime_budget` no conjunto quando
+      # a campanha é CBO, então o vitalício do conjunto é descartado junto com
+      # o diário.
+      adsets_specs = adsets_specs.map { |spec| spec.except('daily_budget', 'lifetime_budget') }
       cbo_check = check_bid_amount_for_cbo(adsets_specs)
       # A campanha JÁ foi criada acima, então este erro também deixa órfã
       # (aí apareceu uma "ZZ CBO sem teto" parada na conta depois do teste).
@@ -540,7 +592,15 @@ class Meta::AdsManagerService
                     name: adset_spec['adset_name'],
                     status: adset_spec['adset_status'].presence || 'PAUSED',
                     campaign_id: campaign_id,
+                    # Descrição do conjunto aparece no Gerenciador de Anúncios e
+                    # é o que o painel usa pra registrar em que página/conversa
+                    # o conjunto roda.
+                    description: adset_spec['description'],
                     daily_budget: adset_spec['daily_budget'],
+                    # Orçamento vitalício: a Meta exige `end_time` junto, e
+                    # nunca aceita vitalício junto com CBO.
+                    lifetime_budget: adset_spec['lifetime_budget'],
+                    end_time: adset_spec['end_time'],
                     optimization_goal: adset_spec['optimization_goal'],
                     bid_strategy: adset_spec['bid_strategy'],
                     # Com CBO a Meta troca a estratégia para
@@ -2174,6 +2234,9 @@ class Meta::AdsManagerService
     conversion_event
     pixel_id
     daily_budget
+    lifetime_budget
+    end_time
+    description
     bid_strategy
     bid_amount
   ].freeze

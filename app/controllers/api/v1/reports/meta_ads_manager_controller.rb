@@ -98,6 +98,11 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
       respond(service.custom_audiences(ad_account_id: params.require(:id_conta_anuncio)))
     when 'listar_pixels'
       respond(service.pixels(ad_account_id: params.require(:id_conta_anuncio)))
+    when 'listar_numeros_whatsapp'
+      respond(service.whatsapp_numbers_for_page(
+                 page_id: params.require(:id_pagina),
+                 ad_account_id: params.require(:id_conta_anuncio)
+               ))
     when 'listar_paginas_por_conta'
       respond(service.pages_for_ad_account(
         ad_account_id: params.require(:id_conta_anuncio),
