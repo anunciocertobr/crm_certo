@@ -400,7 +400,7 @@ class Meta::AdsManagerService
       'asset_url' => asset_url,
       'link' => overrides['link'].presence || link,
       'targeting' => adset['targeting'] || {}
-    }.compact
+    }.merge(adset_level_overrides(overrides)).compact
 
     create_campaign_full(ad_account_id: ad_account_id, campanha: campanha)
   end
@@ -608,7 +608,7 @@ class Meta::AdsManagerService
       'asset_url' => asset_url,
       'link' => overrides['link'].presence || link,
       'targeting' => source.data['targeting'] || {}
-    }.compact
+    }.merge(adset_level_overrides(overrides)).compact
 
     lead_form_id = nil
     if lead_flow?(campanha)
@@ -2150,6 +2150,33 @@ class Meta::AdsManagerService
       end
     end
     nil
+  end
+
+  # Campos do NÍVEL DO CONJUNTO que chegam pelo `overrides` da duplicação.
+  # Ficam separados dos de campanha/anúncio de propósito: a página, o destino
+  # de conversa e o local de conversão são decididos no conjunto, e mandá-los
+  # junto do resto faria o criativo apontar pra um destino e o conjunto pra
+  # outro — que é exatamente a "incompatibilidade entre criativo e objetivo"
+  # que a Meta reporta. `bid_amount` entra aqui porque o limite de lance só faz
+  # sentido junto com `bid_strategy`/`daily_budget`.
+  ADSET_LEVEL_OVERRIDE_KEYS = %w[
+    page_id
+    mensagem_destino
+    whatsapp_phone_number
+    conversion_location
+    conversion_app
+    conversion_event
+    pixel_id
+    daily_budget
+    bid_strategy
+    bid_amount
+  ].freeze
+
+  def adset_level_overrides(overrides)
+    ADSET_LEVEL_OVERRIDE_KEYS.each_with_object({}) do |key, acc|
+      value = overrides[key]
+      acc[key] = value if value.present?
+    end
   end
 
   # `bid_amount` (limite de lance / custo-alvo) é o único campo de orçamento da
