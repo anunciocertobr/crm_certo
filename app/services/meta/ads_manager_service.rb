@@ -570,7 +570,7 @@ class Meta::AdsManagerService
     text = error.to_s
     return false if text.blank?
 
-    PLACEMENT_ERROR_CODES.any? { |code| text.include?("código #{code}") } ||
+    PLACEMENT_ERROR_CODES.any? { |code| error_code?(text, code) } ||
       text.include?('posicionamento') || text.include?('posições')
   end
 
@@ -1751,13 +1751,51 @@ class Meta::AdsManagerService
     Result.new(success: updated.success, data: [{ 'body' => { 'success' => updated.success } }], error: updated.error)
   end
 
+  # O conjunto/recriativo recém-criado demora alguns segundos pra ficar
+  # "pronto" na Meta: postar o anúncio antes disso volta com o código 33
+  # ("objeto referenciado não está disponível"), que é condição de tempo e não
+  # erro de payload — o mesmo POST é aceito segundos depois. Repetir com espera
+  # curta evita o erro na cara do usuário.
+  #
+  # O 1487891 ("criativo incompatível com o objetivo") NÃO entra aqui: ele foi
+  # testado nessa lista e não se recupera com repetição (3 tentativas com
+  # 2s/4s/8s falharam igual), porque nesse caso o criativo está realmente no
+  # formato errado para o destino do conjunto.
+  TRANSIENT_AD_ERROR_CODES = ['33', '2', '1', '613'].freeze
+  AD_RETRY_DELAYS = [2, 4, 8].freeze
+
+  # Casa o CÓDIGO do erro da Meta com limite de palavra. Comparar com
+  # `include?` puro engana: o texto "(código 1487891)" CONTÉM "(código 1)", então
+  # qualquer código de 1 dígito casava com todo erro e o retry disparava em
+  # falhas permanentes, gastando segundos à toa antes de devolver o erro real.
+  def error_code?(text, code)
+    text.match?(/\(c[oó]digo\s+#{Regexp.escape(code.to_s)}\)/i)
+  end
+
+  def transient_ad_error?(error)
+    text = error.to_s
+    return false if text.blank?
+
+    TRANSIENT_AD_ERROR_CODES.any? { |code| error_code?(text, code) }
+  end
+
   def create_ad_only(act:, adset_id:, creative_id:, campanha:)
-    ad = post("/#{act}/ads", {
-                 name: campanha['ad_name'],
-                 status: campanha['ad_status'].presence || 'PAUSED',
-                 adset_id: adset_id,
-                 creative: { creative_id: creative_id }.to_json
-               })
+    body = {
+      name: campanha['ad_name'],
+      status: campanha['ad_status'].presence || 'PAUSED',
+      adset_id: adset_id,
+      creative: { creative_id: creative_id }.to_json
+    }
+
+    ad = post("/#{act}/ads", body)
+    AD_RETRY_DELAYS.each do |espera|
+      break if ad.success || !transient_ad_error?(ad.error)
+
+      sleep espera
+      Rails.logger.info("Meta::AdsManagerService: anúncio ainda indisponível (#{ad.error.to_s.gsub(/\s+/, ' ')[0, 120]}); repetindo em #{espera}s")
+      ad = post("/#{act}/ads", body)
+    end
+
     return step_error(ad, 'anúncio') unless ad.success
 
     Result.new(success: true, data: [{ 'body' => { 'success' => true, 'ad_id' => ad.data['id'], 'creative_id' => creative_id } }])
