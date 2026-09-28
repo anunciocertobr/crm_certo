@@ -99,13 +99,26 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
     when 'listar_pixels'
       respond(service.pixels(ad_account_id: params.require(:id_conta_anuncio)))
     when 'listar_paginas_por_conta'
-      respond(service.pages_for_ad_account(ad_account_id: params.require(:id_conta_anuncio)))
+      respond(service.pages_for_ad_account(
+        ad_account_id: params.require(:id_conta_anuncio),
+        business_id: params[:id_bm]
+      ))
+    when 'listar_instagram_por_conta'
+      respond(service.instagram_accounts_for_business(business_id: params.require(:id_bm)))
+    when 'listar_videos_por_origem'
+      respond(service.videos_by_source(
+        source: params.require(:origem),
+        source_id: params[:id_origem],
+        limit: params.fetch(:limite, 50).to_i.clamp(1, 100)
+      ))
     when 'conta_instagram_da_pagina'
       respond(service.instagram_account_for_page(page_id: params.require(:id_pagina)))
     when 'detalhe_publico'
       respond(service.audience_detail(audience_id: params.require(:id_publico)))
     when 'nome_publico'
       respond(service.audience_name(audience_id: params.require(:id_publico)))
+    when 'excluir_publico'
+      respond(service.delete_audience(audience_id: params.require(:id_publico)))
     when 'criar_publico_site'
       respond(service.create_website_audience(
         ad_account_id: params.require(:id_conta_anuncio),
