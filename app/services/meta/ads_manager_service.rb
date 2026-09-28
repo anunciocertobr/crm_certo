@@ -461,9 +461,15 @@ class Meta::AdsManagerService
     # CBO: o dinheiro é dividido pelo próprio Meta, então o conjunto não pode
     # mandar orçamento junto (a Meta usa o do conjunto e ignora o da campanha).
     if !adset_budget_shared
-      adsets_specs = adsets_specs.map { |spec| adset_budget_shared ? spec : spec.except('daily_budget') }
+      adsets_specs = adsets_specs.map { |spec| spec.except('daily_budget') }
       cbo_check = check_bid_amount_for_cbo(adsets_specs)
-      return Result.new(success: false, error: cbo_check) if cbo_check
+      # A campanha JÁ foi criada acima, então este erro também deixa órfã
+      # (aí apareceu uma "ZZ CBO sem teto" parada na conta depois do teste).
+      if cbo_check
+        discard_orphan_campaign(campaign.data['id'])
+        discard_orphan_lead_form(lead_form_id, campanha)
+        return Result.new(success: false, error: cbo_check)
+      end
     end
 
     created_adsets = []
