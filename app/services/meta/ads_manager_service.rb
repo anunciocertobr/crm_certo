@@ -252,7 +252,7 @@ class Meta::AdsManagerService
       "/act_#{ad_account_id}/campaigns",
       fields: 'id,name,status,objective,description,' \
               'adsets{name,status,description,daily_budget,lifetime_budget,targeting,promoted_object,start_time,end_time,' \
-              'optimization_goal,bid_strategy,ads{name,status,adcreative{name,body,title,image_url,video_id}}}',
+              'optimization_goal,bid_strategy,ads{name,status,adcreative{name,body,title,image_url,video_id,object_story_spec{link_data{description,name,message},video_data{title,message}}}}',
       limit: 200
     )
     return structural unless structural.success
