@@ -1937,6 +1937,9 @@ class Meta::AdsManagerService
     url = resolve_creative_source_asset(criativo.data.to_h['creative'])
     return Result.new(success: false, error: 'Não encontrei imagem nem vídeo no anúncio de origem pra reaproveitar.') if url.blank?
 
+    @source_ad_link_cache ||= {}
+    @source_ad_link_cache[ad_id_origem] = criativo.data.to_h.dig('creative', 'object_story_spec', 'link_data', 'link').presence
+
     fetch_external_asset(normalize_public_url(url))
   end
 
@@ -2216,7 +2219,15 @@ class Meta::AdsManagerService
                        # O modal não tem campo de link de destino (foi desenhado só pra
                        # mensagens) — quando vier um `link` de verdade (campanha de
                        # site/tráfego), usa ele; senão cai na própria Página como antes.
-                       link: campanha['link'].presence || "https://www.facebook.com/#{page_id}",
+                       # EXCEÇÃO: anúncio de Geração de Cadastros (formulário) a Meta
+                       # recusa com "devem sempre se vincular a um conteúdo externo"
+                       # quando o link aponta pra facebook.com — precisa de uma URL
+                       # externa de verdade mesmo o formulário abrindo dentro do
+                       # anúncio. Ao duplicar, reaproveita o link do anúncio de
+                       # origem (que já passou por essa validação quando foi criado).
+                       link: campanha['link'].presence ||
+                             (lead_form_id.present? && @source_ad_link_cache&.dig(campanha['ad_id_origem'])) ||
+                             "https://www.facebook.com/#{page_id}",
                        call_to_action: cta
                      }.compact
                    }
