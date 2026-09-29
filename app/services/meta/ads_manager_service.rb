@@ -250,8 +250,8 @@ class Meta::AdsManagerService
 
     structural = get(
       "/act_#{ad_account_id}/campaigns",
-      # `adsets{...ads{...adcreative{...object_story_spec{...}}}}` precisa de
-      # uma chave de fechamento por nível aberto (adsets/ads/adcreative/
+      # `adsets{...ads{...creative{...object_story_spec{...}}}}` precisa de
+      # uma chave de fechamento por nível aberto (adsets/ads/creative/
       # object_story_spec) — faltava uma (5 aberturas reais incluindo
       # link_data/video_data, só 4 fechos), e a Graph API recusa a
       # requisição INTEIRA com "Syntax error ... got end of string" (código
@@ -265,9 +265,16 @@ class Meta::AdsManagerService
       # carrega `value.lead_gen_form_id` quando o anúncio usa formulário — sem
       # os dois, "Duplicar" de uma campanha de formulário abria sem página e
       # sem conseguir saber que a origem era formulário (caía em "Nenhuma").
+      # O campo do node Ad é `creative` (não `adcreative` - esse nome só
+      # existe no endpoint de CRIAÇÃO, "/act_.../adcreatives"). Pedir
+      # `adcreative{...}` aqui nunca deu erro nenhum: a Graph API só ignora
+      # campo desconhecido em silêncio, então "ads{...}" sempre voltava sem
+      # NENHUM dado de criativo - página, texto e imagem do anúncio nunca
+      # chegavam no "Duplicar", desde sempre. Achado ao vivo comparando a
+      # resposta desta query com uma busca direta no ad usando `creative`.
       fields: 'id,name,status,objective,description,' \
               'adsets{name,status,description,daily_budget,lifetime_budget,targeting,promoted_object,start_time,end_time,' \
-              'optimization_goal,bid_strategy,ads{name,status,adcreative{name,body,title,image_url,video_id,object_story_spec{page_id,link_data{description,name,message,call_to_action},video_data{title,message}}}}}',
+              'optimization_goal,bid_strategy,ads{name,status,creative{name,body,title,image_url,video_id,object_story_spec{page_id,link_data{description,name,message,call_to_action},video_data{title,message}}}}}',
       limit: 200
     )
     return structural unless structural.success
