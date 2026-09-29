@@ -250,31 +250,21 @@ class Meta::AdsManagerService
 
     structural = get(
       "/act_#{ad_account_id}/campaigns",
-      # `adsets{...ads{...creative{...object_story_spec{...}}}}` precisa de
-      # uma chave de fechamento por nível aberto (adsets/ads/creative/
-      # object_story_spec) — faltava uma (5 aberturas reais incluindo
-      # link_data/video_data, só 4 fechos), e a Graph API recusa a
-      # requisição INTEIRA com "Syntax error ... got end of string" (código
-      # 2500) em vez de aceitar parcialmente. O controller engolia esse erro
-      # e a tela só mostrava "Nenhum item encontrado", sem indicar que era
-      # uma falha de verdade — achado ao vivo tentando criar uma campanha de
-      # teste na conta Anuncio Certo Boleto.
-      # `object_story_spec.page_id` é a página que RECEBEU o post do anúncio
-      # (a Meta às vezes não replica isso em `promoted_object.page_id`,
-      # sobretudo em anúncio de geração de cadastro) e `call_to_action`
-      # carrega `value.lead_gen_form_id` quando o anúncio usa formulário — sem
-      # os dois, "Duplicar" de uma campanha de formulário abria sem página e
-      # sem conseguir saber que a origem era formulário (caía em "Nenhuma").
-      # O campo do node Ad é `creative` (não `adcreative` - esse nome só
-      # existe no endpoint de CRIAÇÃO, "/act_.../adcreatives"). Pedir
-      # `adcreative{...}` aqui nunca deu erro nenhum: a Graph API só ignora
-      # campo desconhecido em silêncio, então "ads{...}" sempre voltava sem
-      # NENHUM dado de criativo - página, texto e imagem do anúncio nunca
-      # chegavam no "Duplicar", desde sempre. Achado ao vivo comparando a
-      # resposta desta query com uma busca direta no ad usando `creative`.
+      # `ads{...}` NÃO pede `creative` aqui de propósito: pedir o creative
+      # completo (texto/imagem/object_story_spec) de TODO anúncio de TODA
+      # campanha da conta de uma vez estoura o limite de tamanho de resposta
+      # da Graph API ("Please reduce the amount of data you're asking for",
+      # código 1) em contas com histórico grande - achado ao vivo na conta
+      # Master Porto Alegre (CA) assim que o nome do campo foi corrigido de
+      # `adcreative` (inválido, sempre voltava vazio) pra `creative` (válido,
+      # e MUITO mais pesado por vir populado de verdade). O criativo de um
+      # anúncio específico é buscado à parte, sob demanda, por
+      # `campaign_ads_creatives` - ver esse método logo abaixo - chamado só
+      # quando alguém abre "Duplicar" numa campanha (poucos anúncios), nunca
+      # pra árvore inteira da conta.
       fields: 'id,name,status,objective,description,' \
               'adsets{name,status,description,daily_budget,lifetime_budget,targeting,promoted_object,start_time,end_time,' \
-              'optimization_goal,bid_strategy,ads{name,status,creative{name,body,title,image_url,video_id,object_story_spec{page_id,link_data{description,name,message,call_to_action},video_data{title,message}}}}}',
+              'optimization_goal,bid_strategy,ads{name,status}}',
       limit: 200
     )
     return structural unless structural.success
@@ -289,6 +279,36 @@ class Meta::AdsManagerService
     return insights unless insights.success
 
     Result.new(success: true, data: [{ 'dados campanhas' => { 'data' => structural.data }, 'insights' => { 'data' => insights.data } }])
+  end
+
+  # Criativo (página, texto, imagem, formulário de lead) de TODOS os
+  # anúncios de UMA campanha - usado pelo "Duplicar campanha" pra preencher
+  # a cópia. Separado de `campaigns_tree` de propósito: pedir isso pra
+  # conta inteira de uma vez estourava o limite de tamanho de resposta da
+  # Graph API em contas grandes (ver comentário em `campaigns_tree`); uma
+  # campanha sozinha tem poucos conjuntos/anúncios, então o payload fica
+  # sempre pequeno o suficiente.
+  def campaign_ads_creatives(campaign_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    result = get(
+      "/#{campaign_id}/adsets",
+      fields: 'id,ads{id,creative{name,body,title,image_url,video_id,' \
+              'object_story_spec{page_id,link_data{description,name,message,call_to_action},video_data{title,message}}}}',
+      limit: 200
+    )
+    return result unless result.success
+
+    # Achata pra { ad_id => creative } - mais fácil de casar no front do que
+    # navegar adsets->ads de novo pra algo que já tem o ad_id disponível.
+    creatives_by_ad_id = {}
+    result.data.each do |adset|
+      (adset['ads'] || {})['data']&.each do |ad|
+        creatives_by_ad_id[ad['id']] = ad['creative'] if ad['creative']
+      end
+    end
+
+    Result.new(success: true, data: [{ 'criativos_por_anuncio' => creatives_by_ad_id }])
   end
 
   # Suporta os 3 formatos de criativo que a Meta Ads tem: imagem única,

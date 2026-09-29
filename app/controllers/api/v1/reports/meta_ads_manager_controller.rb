@@ -30,6 +30,8 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
       ))
     when 'criativo'
       respond(service.creative_details(ad_id: params.require(:id_anuncio)))
+    when 'criativos_da_campanha'
+      respond(service.campaign_ads_creatives(campaign_id: params.require(:id_campanha)))
     when 'conta_info'
       respond(service.account_info(ad_account_id: params.require(:id_conta_anuncio)))
     when 'conta_historico'
