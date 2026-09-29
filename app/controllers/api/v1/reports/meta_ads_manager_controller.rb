@@ -236,6 +236,48 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
     when 'excluir_lista_direcionamento'
       TargetingList.find(params.require(:id)).destroy
       render json: { success: true }
+    # --- Grupos de localização (locais, não são objeto da Graph API;
+    # salvos POR CONTA DE ANÚNCIO — diferente das listas de direcionamento
+    # acima, que são globais — pra poder duplicar tanto dentro da mesma
+    # conta quanto pra outra) ---
+    when 'listar_grupos_localizacao'
+      grupos = LocationGroup.where(ad_account_id: params.require(:id_conta_anuncio)).alphabetical
+      render json: grupos.as_json(only: %i[id ad_account_id name pins])
+    when 'criar_grupo_localizacao'
+      grupo = LocationGroup.new(
+        ad_account_id: params.require(:id_conta_anuncio),
+        name: params.require(:name),
+        pins: parse_json_array(params[:pins])
+      )
+      if grupo.save
+        render json: grupo.as_json(only: %i[id ad_account_id name pins])
+      else
+        error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD, grupo.errors.full_messages.to_sentence, status: :unprocessable_entity)
+      end
+    when 'atualizar_grupo_localizacao'
+      grupo = LocationGroup.find(params.require(:id))
+      grupo.name = params[:name] if params[:name].present?
+      grupo.pins = parse_json_array(params[:pins]) if params[:pins].present?
+      if grupo.save
+        render json: grupo.as_json(only: %i[id ad_account_id name pins])
+      else
+        error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD, grupo.errors.full_messages.to_sentence, status: :unprocessable_entity)
+      end
+    when 'excluir_grupo_localizacao'
+      LocationGroup.find(params.require(:id)).destroy
+      render json: { success: true }
+    when 'duplicar_grupo_localizacao'
+      origem = LocationGroup.find(params.require(:id))
+      copia = LocationGroup.new(
+        ad_account_id: params.require(:id_conta_destino),
+        name: params[:name].presence || "#{origem.name} - Cópia",
+        pins: origem.pins
+      )
+      if copia.save
+        render json: copia.as_json(only: %i[id ad_account_id name pins])
+      else
+        error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD, copia.errors.full_messages.to_sentence, status: :unprocessable_entity)
+      end
     else
       error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD, "Ação desconhecida: #{params[:acao]}", status: :unprocessable_entity)
     end
