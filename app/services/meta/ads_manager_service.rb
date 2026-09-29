@@ -537,7 +537,7 @@ class Meta::AdsManagerService
                        special_ad_categories: [].to_json,
                        is_adset_budget_sharing_enabled: false
                      }.tap do |body|
-      body[:daily_budget] = campaign_budget if campaign_budget
+      body[:daily_budget] = bid_amount_cents(campaign_budget) if campaign_budget
     end)
     return step_error(campaign, 'campanha') unless campaign.success
 
@@ -653,10 +653,10 @@ class Meta::AdsManagerService
                     # é o que o painel usa pra registrar em que página/conversa
                     # o conjunto roda.
                     description: adset_spec['description'],
-                    daily_budget: adset_spec['daily_budget'],
+                    daily_budget: bid_amount_cents(adset_spec['daily_budget']),
                     # Orçamento vitalício: a Meta exige `end_time` junto, e
                     # nunca aceita vitalício junto com CBO.
-                    lifetime_budget: adset_spec['lifetime_budget'],
+                    lifetime_budget: bid_amount_cents(adset_spec['lifetime_budget']),
                     end_time: adset_spec['end_time'],
                     optimization_goal: adset_spec['optimization_goal'],
                     bid_strategy: adset_spec['bid_strategy'],
@@ -2453,10 +2453,14 @@ class Meta::AdsManagerService
     end
   end
 
-  # `bid_amount` (limite de lance / custo-alvo) é o único campo de orçamento da
-  # Graph API que vem em CENTAVOS e como inteiro. O front sempre manda no
-  # formato de exibição (R$ 15,00); converter aqui evita o "Param bid_amount
-  # must be an integer" que a Meta devolve cru.
+  # TODO campo de orçamento da Graph API (bid_amount, daily_budget,
+  # lifetime_budget) vem em CENTAVOS e como inteiro. O front sempre manda no
+  # formato de exibição (R$ 15,00); converter aqui evita tanto o "Param
+  # bid_amount must be an integer" quanto — o bug real encontrado ao testar
+  # duplicação ao vivo na conta "Master Porto Alegre (CA)" — a Meta aceitar
+  # um daily_budget silenciosamente errado por 100x (R$50,00 mandado cru
+  # virava R$0,50, abaixo do mínimo, e a criação do conjunto falhava com
+  # "orçamento deve ser superior a R$5,19").
   def bid_amount_cents(value)
     return nil if value.blank?
 
