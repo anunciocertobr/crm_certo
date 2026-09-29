@@ -250,9 +250,18 @@ class Meta::AdsManagerService
 
     structural = get(
       "/act_#{ad_account_id}/campaigns",
+      # `adsets{...ads{...adcreative{...object_story_spec{...}}}}` precisa de
+      # uma chave de fechamento por nível aberto (adsets/ads/adcreative/
+      # object_story_spec) — faltava uma (5 aberturas reais incluindo
+      # link_data/video_data, só 4 fechos), e a Graph API recusa a
+      # requisição INTEIRA com "Syntax error ... got end of string" (código
+      # 2500) em vez de aceitar parcialmente. O controller engolia esse erro
+      # e a tela só mostrava "Nenhum item encontrado", sem indicar que era
+      # uma falha de verdade — achado ao vivo tentando criar uma campanha de
+      # teste na conta Anuncio Certo Boleto.
       fields: 'id,name,status,objective,description,' \
               'adsets{name,status,description,daily_budget,lifetime_budget,targeting,promoted_object,start_time,end_time,' \
-              'optimization_goal,bid_strategy,ads{name,status,adcreative{name,body,title,image_url,video_id,object_story_spec{link_data{description,name,message},video_data{title,message}}}}',
+              'optimization_goal,bid_strategy,ads{name,status,adcreative{name,body,title,image_url,video_id,object_story_spec{link_data{description,name,message},video_data{title,message}}}}}',
       limit: 200
     )
     return structural unless structural.success
