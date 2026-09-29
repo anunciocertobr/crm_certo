@@ -508,14 +508,16 @@ class Meta::AdsManagerService
     return Result.new(success: false, error: 'Página do Facebook sem page_id configurado (necessário pro criativo).') if page_id_for(campanha).blank?
 
     act = "act_#{ad_account_id}"
-
     lead_form_id = nil
-    if lead_flow?(campanha)
-      lead_form = create_lead_form(campanha: campanha)
-      return step_error(lead_form, 'formulário de cadastro') unless lead_form.success
+    campaign_id = nil
 
-      lead_form_id = lead_form.data['id']
-    end
+    begin
+      if lead_flow?(campanha)
+        lead_form = create_lead_form(campanha: campanha)
+        return step_error(lead_form, 'formulário de cadastro') unless lead_form.success
+
+        lead_form_id = lead_form.data['id']
+      end
 
     # Orçamento no nível da CAMPANHA (CBO) é opt-in: só entra quando o front
     # manda `campaign_daily_budget`. Sem ele, cada conjunto carrega o seu
@@ -541,6 +543,8 @@ class Meta::AdsManagerService
     end)
     return step_error(campaign, 'campanha') unless campaign.success
 
+    campaign_id = campaign.data['id']
+
     # `adsets` (novo): array de conjuntos, cada um com seu próprio `ads` —
     # suporta criar uma campanha com vários conjuntos/anúncios de uma vez
     # (pedido do usuário: duplicar Conjunto/Anúncio ao montar a campanha,
@@ -560,7 +564,7 @@ class Meta::AdsManagerService
       # A campanha JÁ foi criada acima, então este erro também deixa órfã
       # (aí apareceu uma "ZZ CBO sem teto" parada na conta depois do teste).
       if cbo_check
-        discard_orphan_campaign(campaign.data['id'])
+        discard_orphan_campaign(campaign_id)
         discard_orphan_lead_form(lead_form_id, campanha)
         return Result.new(success: false, error: cbo_check)
       end
@@ -568,7 +572,7 @@ class Meta::AdsManagerService
 
     created_adsets = []
     adsets_specs.each do |adset_spec|
-      result = create_adset_with_ads(act: act, campaign_id: campaign.data['id'], adset_spec: adset_spec, lead_form_id: lead_form_id)
+      result = create_adset_with_ads(act: act, campaign_id: campaign_id, adset_spec: adset_spec, lead_form_id: lead_form_id)
       unless result.success
         # Se qualquer etapa depois da campanha falhar, a campanha que a gente
         # acabou de criar fica PAUSED e órfã na conta do cliente — sujeira que
@@ -576,7 +580,7 @@ class Meta::AdsManagerService
         # aconteceu: "não entendi essa campanha nova"). Não há gasto (PAUSED),
         # então deletar o que este mesmo fluxo criou é seguro.
         return result.tap do
-          discard_orphan_campaign(campaign.data['id'])
+          discard_orphan_campaign(campaign_id)
           discard_orphan_lead_form(lead_form_id, campanha)
         end
       end
@@ -584,7 +588,21 @@ class Meta::AdsManagerService
       created_adsets << result.data
     end
 
-    Result.new(success: true, data: [{ 'body' => { 'success' => true, 'campaign_id' => campaign.data['id'], 'adsets' => created_adsets } }])
+    Result.new(success: true, data: [{ 'body' => { 'success' => true, 'campaign_id' => campaign_id, 'adsets' => created_adsets } }])
+    rescue Rack::Timeout::RequestTimeoutException, Timeout::Error
+      # O rack-timeout (15s) pode interromper este fluxo no meio da criação
+      # dos conjuntos/anúncios — upload de mídia real (imagem/vídeo) pra
+      # vários anúncios em vários conjuntos facilmente passa disso. Sem este
+      # rescue, a exceção assíncrona pula o `unless result.success` normal
+      # do loop acima e a campanha (e o formulário de lead) já criados ficam
+      # órfãos SEM a limpeza automática — aconteceu de verdade: a campanha
+      # "R17" ficou ATIVA na conta "Master Porto Alegre (CA)" e uma cópia
+      # parcial (só 1 de 3 conjuntos) ficou parada na conta de teste
+      # "Anuncio Certo (Boleto)", nenhuma das duas se limpou sozinha.
+      discard_orphan_campaign(campaign_id)
+      discard_orphan_lead_form(lead_form_id, campanha)
+      raise
+    end
   end
 
   # Apaga a campanha criada por este mesmo fluxo após uma falha, sem deixar
