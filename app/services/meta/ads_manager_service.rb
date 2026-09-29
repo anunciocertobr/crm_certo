@@ -259,9 +259,15 @@ class Meta::AdsManagerService
       # e a tela só mostrava "Nenhum item encontrado", sem indicar que era
       # uma falha de verdade — achado ao vivo tentando criar uma campanha de
       # teste na conta Anuncio Certo Boleto.
+      # `object_story_spec.page_id` é a página que RECEBEU o post do anúncio
+      # (a Meta às vezes não replica isso em `promoted_object.page_id`,
+      # sobretudo em anúncio de geração de cadastro) e `call_to_action`
+      # carrega `value.lead_gen_form_id` quando o anúncio usa formulário — sem
+      # os dois, "Duplicar" de uma campanha de formulário abria sem página e
+      # sem conseguir saber que a origem era formulário (caía em "Nenhuma").
       fields: 'id,name,status,objective,description,' \
               'adsets{name,status,description,daily_budget,lifetime_budget,targeting,promoted_object,start_time,end_time,' \
-              'optimization_goal,bid_strategy,ads{name,status,adcreative{name,body,title,image_url,video_id,object_story_spec{link_data{description,name,message},video_data{title,message}}}}}',
+              'optimization_goal,bid_strategy,ads{name,status,adcreative{name,body,title,image_url,video_id,object_story_spec{page_id,link_data{description,name,message,call_to_action},video_data{title,message}}}}}',
       limit: 200
     )
     return structural unless structural.success
