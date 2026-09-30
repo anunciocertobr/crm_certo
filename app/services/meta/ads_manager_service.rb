@@ -1017,26 +1017,35 @@ class Meta::AdsManagerService
 
   # Lista as Páginas que podem criar públicos de engajamento numa conta de
   # anúncio (Facebook Page / Instagram) e as contas de Instagram da mesma
-  # origem. Segue a mesma owned_pages + client_pages de pages_for_business.
+  # origem.
   #
-  # business_id: a BM que está selecionada na UI. É preferível a resolver
-  # pelo `owner` da conta porque conta de anúncio comprada por terceiro NÃO
-  # tem o dono do gerenciador: o `owner` de uma conta cliente é outra BM (ou
-  # a própria pessoa), e as Páginas que o usuário realmente administra estão
-  # na BM da UI — no caso real que motivou isso, o `owner` apontava para uma
-  # BM diferente e a lista vinha sem as Páginas da conta.
+  # Fonte principal: `/act_{id}/promote_pages`, o mesmo edge que o próprio
+  # Gerenciador de Anúncios da Meta usa pra decidir quais Páginas esta conta
+  # pode veicular — funciona mesmo quando a Página não pertence (nem como
+  # "client_page") à BM que tem a conta de anúncio compartilhada, caso comum
+  # de conta cliente de agência: a conta é compartilhada na BM da agência,
+  # mas a Página do cliente continua na BM dele, então `owned_pages`/
+  # `client_pages` da BM da conta voltam vazios mesmo a conta tendo
+  # campanhas ativas usando uma Página de verdade (achado ao vivo na conta
+  # `999533369485941`: `promote_pages` devolvia a Página real, `owned_pages`/
+  # `client_pages` da BM resolvida vinham as duas vazias).
+  #
+  # `pages_for_business` da BM entra como complemento (não falha a chamada
+  # se der erro) pra também oferecer Páginas que a BM tem mas que esta conta
+  # ainda não usou — business_id, quando informado, é a BM selecionada na UI;
+  # senão resolve pelo `owner` da conta.
   def pages_for_ad_account(ad_account_id:, business_id: nil)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
 
-    business_id = business_id.presence || owning_business_of_ad_account(ad_account_id)
-    if business_id.blank?
-      return Result.new(
-        success: false,
-        error: 'Não foi possível localizar a Business Manager desta conta de anúncio. Selecione a BM no topo da tela.'
-      )
-    end
+    id = ad_account_id.to_s.delete_prefix('act_')
+    promoted = get("/act_#{id}/promote_pages", fields: 'id,name,instagram_business_account{id,username,name}')
+    return promoted unless promoted.success
 
-    pages_for_business(business_id: business_id)
+    resolved_business_id = business_id.presence || owning_business_of_ad_account(ad_account_id)
+    from_business = resolved_business_id.present? ? pages_for_business(business_id: resolved_business_id) : nil
+    extra = from_business&.success ? from_business.data : []
+
+    Result.new(success: true, data: (promoted.data + extra).uniq { |p| p['id'] })
   end
 
   # Contas de Instagram (perfil profissional) ligadas às Páginas de uma BM —
