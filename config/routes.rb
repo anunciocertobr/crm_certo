@@ -51,6 +51,8 @@ Rails.application.routes.draw do
       scope 'finances' do
         resources :fiscal_establishments, only: %i[index create update destroy],
                                            controller: 'finances/fiscal_establishments'
+        resources :fiscal_tomadores, only: %i[index create update destroy],
+                                      controller: 'finances/fiscal_tomadores'
         resources :service_invoices, only: %i[index create show], controller: 'finances/service_invoices' do
           member do
             post :cancel
