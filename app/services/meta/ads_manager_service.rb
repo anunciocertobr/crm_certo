@@ -293,18 +293,40 @@ class Meta::AdsManagerService
 
     result = get(
       "/#{campaign_id}/adsets",
-      fields: 'id,ads{id,creative{name,body,title,image_url,video_id,' \
-              'object_story_spec{page_id,link_data{description,name,message,call_to_action},video_data{title,message}}}}',
+      fields: 'id,ads{id,creative{name,body,title,image_url,thumbnail_url,video_id,' \
+              'object_story_spec{page_id,link_data{description,name,message,call_to_action,picture,child_attachments},' \
+              'video_data{title,message,image_url}}}}',
       limit: 200
     )
     return result unless result.success
 
     # Achata pra { ad_id => creative } - mais fácil de casar no front do que
     # navegar adsets->ads de novo pra algo que já tem o ad_id disponível.
+    # Além dos campos crus (usados pra montar a cópia), soma `imagem`/
+    # `carrossel` normalizados — os mesmos 3 formatos que `creative_details`
+    # já resolve pro "Ver Criativo" — pra "Duplicar campanha" também
+    # conseguir mostrar uma prévia de verdade (imagem, vídeo ou carrossel),
+    # não só o nome/texto do anúncio. Sem a chamada extra por vídeo que
+    # `creative_details` faz (resolver o .mp4/permalink): aqui é só prévia,
+    # não precisa abrir o vídeo, então `thumbnail_url`/`video_data.image_url`
+    # (que já vêm nesta mesma resposta) bastam.
     creatives_by_ad_id = {}
     result.data.each do |adset|
       (adset['ads'] || {})['data']&.each do |ad|
-        creatives_by_ad_id[ad['id']] = ad['creative'] if ad['creative']
+        creative = ad['creative']
+        next unless creative
+
+        link_data = creative.dig('object_story_spec', 'link_data') || {}
+        video_data = creative.dig('object_story_spec', 'video_data') || {}
+        carousel = Array(link_data['child_attachments']).map do |card|
+          { 'imagem' => card['picture'] || card['image_url'], 'nome' => card['name'], 'descricao' => card['description'] }
+        end
+
+        creatives_by_ad_id[ad['id']] = creative.merge(
+          'imagem' => creative['image_url'] || link_data['picture'],
+          'thumbnail_url' => creative['thumbnail_url'] || video_data['image_url'],
+          'carrossel' => carousel
+        )
       end
     end
 
