@@ -527,7 +527,19 @@ class Meta::AdsManagerService
   # o resto falhar, então não há gasto — só sujeira pra apagar manualmente).
   def create_campaign_full(ad_account_id:, campanha:)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
-    return Result.new(success: false, error: 'Página do Facebook sem page_id configurado (necessário pro criativo).') if page_id_for(campanha).blank?
+
+    # `page_id` só existe dentro de cada item de `adsets` (é lá que o front
+    # deixa escolher a Página, por conjunto) — o hash `campanha` de nível
+    # raiz nunca teve esse campo. Resolver aqui, pelo primeiro conjunto, e
+    # usar esse valor tanto pra validar quanto pra criar o formulário de
+    # lead (abaixo): sem isso, `page_id_for(campanha)` caía sempre no
+    # fallback `@page&.page_id` (a Página padrão da integração) e ignorava
+    # a Página escolhida — o formulário nascia numa Página diferente da
+    # que o anúncio ia usar, e o criativo então via essa Página errada como
+    # "sem site cadastrado" mesmo a Página certa tendo site.
+    adsets_specs = campanha['adsets'].presence || [campanha]
+    primary_page_id = adsets_specs.first&.dig('page_id').presence || campanha['page_id']
+    return Result.new(success: false, error: 'Página do Facebook sem page_id configurado (necessário pro criativo).') if primary_page_id.blank?
 
     act = "act_#{ad_account_id}"
     lead_form_id = nil
@@ -535,7 +547,7 @@ class Meta::AdsManagerService
 
     begin
       if lead_flow?(campanha)
-        lead_form = create_lead_form(campanha: campanha)
+        lead_form = create_lead_form(campanha: campanha.merge('page_id' => primary_page_id))
         return step_error(lead_form, 'formulário de cadastro') unless lead_form.success
 
         lead_form_id = lead_form.data['id']
@@ -567,14 +579,14 @@ class Meta::AdsManagerService
 
     campaign_id = campaign.data['id']
 
-    # `adsets` (novo): array de conjuntos, cada um com seu próprio `ads` —
+    # `adsets_specs` já foi resolvido no início do método (precisava do
+    # `page_id` do primeiro conjunto antes de criar o formulário de lead) —
     # suporta criar uma campanha com vários conjuntos/anúncios de uma vez
     # (pedido do usuário: duplicar Conjunto/Anúncio ao montar a campanha,
     # cada conjunto com seu próprio mapa/localização/público no front).
-    # Sem essa chave, cai no formato antigo achatado (um conjunto + um
-    # anúncio só, campos direto em `campanha`) — mantém compatibilidade
-    # total com duplicate_adset_to_campaign, que só sabe montar esse formato.
-    adsets_specs = campanha['adsets'].presence || [campanha]
+    # Sem `adsets`, cai no formato antigo achatado (um conjunto + um anúncio
+    # só, campos direto em `campanha`) — mantém compatibilidade total com
+    # duplicate_adset_to_campaign, que só sabe montar esse formato.
     # CBO: o dinheiro é dividido pelo próprio Meta, então o conjunto não pode
     # mandar orçamento junto (a Meta usa o do conjunto e ignora o da campanha).
     if !adset_budget_shared
@@ -737,6 +749,11 @@ class Meta::AdsManagerService
     ads_specs = adset_spec['ads'].presence || [adset_spec]
     created_ads = []
     ads_specs.each do |ad_spec|
+      # `page_id` só vem no `adset_spec` (é lá que o front deixa escolher a
+      # Página) — sem herdar aqui, `page_id_for` dentro de `build_creative`
+      # caía no fallback `@page&.page_id` (Página padrão da integração, não
+      # a escolhida) e a validação de site cadastrado batia na Página errada.
+      ad_spec = ad_spec.merge('page_id' => ad_spec['page_id'] || adset_spec['page_id'])
       creative = build_creative(act: act, campanha: ad_spec, lead_form_id: lead_form_id)
       return step_error(creative, 'criativo') unless creative.success
 
