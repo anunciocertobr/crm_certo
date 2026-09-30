@@ -1968,10 +1968,27 @@ class Meta::AdsManagerService
     url = resolve_creative_source_asset(criativo.data.to_h['creative'])
     return Result.new(success: false, error: 'Não encontrei imagem nem vídeo no anúncio de origem pra reaproveitar.') if url.blank?
 
-    @source_ad_link_cache ||= {}
-    @source_ad_link_cache[ad_id_origem] = criativo.data.to_h.dig('creative', 'object_story_spec', 'link_data', 'link').presence
-
     fetch_external_asset(normalize_public_url(url))
+  end
+
+  # Site cadastrado na própria Página do Facebook (campo `website`) — usado
+  # como o link EXTERNO que o criativo de anúncio de Geração de Cadastros
+  # exige (ver #build_creative). O formulário continua abrindo dentro do
+  # próprio anúncio; esse link nunca aparece pra quem vê o anúncio, é só um
+  # campo técnico que a Graph API insiste em validar como "conteúdo externo
+  # de verdade" — por isso resolver pelo site da Página, em vez de pedir
+  # isso pra pessoa no painel ou reaproveitar o link do anúncio de origem
+  # (que quebra ao duplicar de WhatsApp/Messenger pra Formulário: um link
+  # de conversa não é "conteúdo externo" pra Meta, mesmo já tendo passado
+  # nessa validação quando o anúncio original foi criado com outro tipo).
+  def page_website_for(page_id)
+    return nil if page_id.blank?
+
+    @page_website_cache ||= {}
+    return @page_website_cache[page_id] if @page_website_cache.key?(page_id)
+
+    result = get("/#{page_id}", fields: 'website')
+    @page_website_cache[page_id] = result.success ? result.data['website'].presence : nil
   end
 
   # Links de compartilhamento do Dropbox (`dl=0`) devolvem uma página HTML de
@@ -2198,6 +2215,25 @@ class Meta::AdsManagerService
     return asset unless asset.success
     base64, mimetype = asset.data
     page_id = page_id_for(campanha)
+
+    # Geração de Cadastros exige um link EXTERNO de verdade no criativo (ver
+    # o comentário mais abaixo, no `link:` do link_data) — sem um `link`
+    # explícito e sem site cadastrado na Página, não existe uma URL válida
+    # pra usar, e mandar mesmo assim só devolveria um erro genérico da Meta
+    # depois de já ter subido a imagem/vídeo. Aqui vem ANTES do upload,
+    # com uma mensagem que diz exatamente o que falta e onde resolver — em
+    # vez de inventar um domínio qualquer (sujaria o anúncio de um cliente
+    # com um link que não é dele) ou reaproveitar o link do anúncio de
+    # origem (quebra ao duplicar de WhatsApp/Messenger pra Formulário).
+    if lead_form_id.present? && campanha['link'].blank? && page_website_for(page_id).blank?
+      return Result.new(
+        success: false,
+        error: 'Esta Página do Facebook não tem um site cadastrado, e a Meta exige um link externo no ' \
+               'anúncio de Formulário mesmo o formulário abrindo dentro do próprio anúncio. Adicione um site em ' \
+               'Configurações da Página no Gerenciador de Negócios e tente de novo.'
+      )
+    end
+
     # Precisa bater com o `destination_type` do adset (ver create_campaign_full)
     # — MESSAGE_PAGE sem isso, ou com um app_destination diferente do adset,
     # é a causa exata do "Incompatibilidade entre criativo e objetivo". O
@@ -2252,12 +2288,16 @@ class Meta::AdsManagerService
                        # site/tráfego), usa ele; senão cai na própria Página como antes.
                        # EXCEÇÃO: anúncio de Geração de Cadastros (formulário) a Meta
                        # recusa com "devem sempre se vincular a um conteúdo externo"
-                       # quando o link aponta pra facebook.com — precisa de uma URL
-                       # externa de verdade mesmo o formulário abrindo dentro do
-                       # anúncio. Ao duplicar, reaproveita o link do anúncio de
-                       # origem (que já passou por essa validação quando foi criado).
+                       # quando o link aponta pra facebook.com ou pra um link de
+                       # conversa (WhatsApp/Messenger) — precisa de uma URL externa de
+                       # verdade mesmo o formulário abrindo dentro do anúncio.
+                       # `page_website_for` resolve isso pelo site da própria Página; se
+                       # não tiver site cadastrado, o guard-clause no início do método já
+                       # bloqueou com um erro claro antes de chegar aqui, então nunca cai
+                       # no link do anúncio de origem (quebrava ao duplicar de
+                       # WhatsApp/Messenger pra Formulário).
                        link: campanha['link'].presence ||
-                             (lead_form_id.present? && @source_ad_link_cache&.dig(campanha['ad_id_origem'])) ||
+                             (lead_form_id.present? && page_website_for(page_id)) ||
                              "https://www.facebook.com/#{page_id}",
                        call_to_action: cta
                      }.compact
