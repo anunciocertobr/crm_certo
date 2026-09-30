@@ -48,11 +48,13 @@ Rails.application.routes.draw do
       resources :recurring_transactions, only: [:index, :create, :update, :destroy]
       post 'finances/receipt_extractions', to: 'finances/receipt_extractions#create'
       get 'finances/receipt_extractions/providers', to: 'finances/receipt_extractions#providers'
-      resources :fiscal_establishments, only: %i[index create update destroy],
-                                         controller: 'finances/fiscal_establishments'
-      resources :service_invoices, only: %i[index create show], controller: 'finances/service_invoices' do
-        member do
-          post :cancel
+      scope 'finances' do
+        resources :fiscal_establishments, only: %i[index create update destroy],
+                                           controller: 'finances/fiscal_establishments'
+        resources :service_invoices, only: %i[index create show], controller: 'finances/service_invoices' do
+          member do
+            post :cancel
+          end
         end
       end
 
