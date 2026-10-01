@@ -43,6 +43,22 @@ class Public::Api::V1::RealEstateController < PublicController
     end
   end
 
+  # GET /public/api/v1/real_estate/zap_feed/:token — feed XML (VrSync) que a
+  # ZAP Imóveis/Viva Real/OLX relê sozinha a cada ~12h depois de cadastrada no
+  # Canal Pro (ver RealEstate::ZapImoveisFeedBuilder). Token confere contra
+  # ZAP_FEED_TOKEN (Organização > Imobiliária) — não é autenticação de
+  # verdade (os dados já são públicos na página /imoveis), só evita que a URL
+  # seja adivinhada/raspada por terceiros antes de ser cadastrada no portal.
+  def zap_feed
+    expected = GlobalConfigService.load('ZAP_FEED_TOKEN', nil)
+    if expected.blank? || !ActiveSupport::SecurityUtils.secure_compare(params[:token].to_s, expected)
+      head :not_found
+      return
+    end
+
+    render xml: RealEstate::ZapImoveisFeedBuilder.build
+  end
+
   private
 
   def lead_params

@@ -993,6 +993,10 @@ Rails.application.routes.draw do
         # público, sem API key (mesmo padrão do cardápio digital acima).
         get 'real_estate', to: 'real_estate#show'
         post 'real_estate/leads', to: 'real_estate#create_lead'
+        # Feed XML (formato VrSync) consumido pela ZAP Imóveis/Viva Real/OLX —
+        # o token no path (não query string) porque alguns rastreadores de
+        # portal normalizam/descartam query params ao salvar a URL cadastrada.
+        get 'real_estate/zap_feed/:token', to: 'real_estate#zap_feed', defaults: { format: 'xml' }
 
         resources :csat_survey, only: [:show, :update]
       end

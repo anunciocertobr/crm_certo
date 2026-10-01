@@ -89,6 +89,13 @@ module Api
           # REAL_ESTATE_LEAD_DISTRIBUTION_* controlam Public::RealEstate::AgentAssignmentService
           # (MODE: queue|random|single; AGENT_SCOPE: active|all; RESPECT_HOURS: "true"/"false";
           # SINGLE_AGENT_ID: id de um corretor de REAL_ESTATE_AGENTS, usado só quando MODE=single).
+          # ZAP_FEED_TOKEN identifica a URL pública do feed VrSync
+          # (Public::Api::V1::RealEstateController#zap_feed) — qualquer um com
+          # o token monta a URL e lê o feed, então funciona como senha da URL,
+          # não como autenticação de verdade; os dados em si já são públicos
+          # na página /imoveis mesmo. ZAP_CONTACT_EMAIL é o <ContactInfo><Email>
+          # exigido pelo schema VrSync, separado de REAL_ESTATE_WHATSAPP_NUMBER
+          # porque o portal exige e-mail, não WhatsApp.
           'real_estate' => %w[
             REAL_ESTATE_COMPANY_NAME REAL_ESTATE_HEADER_COLOR REAL_ESTATE_BACKGROUND_COLOR
             REAL_ESTATE_FOOTER_COLOR REAL_ESTATE_ICON_COLOR REAL_ESTATE_TEXT_COLOR
@@ -96,6 +103,7 @@ module Api
             REAL_ESTATE_WHATSAPP_NUMBER REAL_ESTATE_AGENTS
             REAL_ESTATE_LEAD_DISTRIBUTION_MODE REAL_ESTATE_LEAD_DISTRIBUTION_AGENT_SCOPE
             REAL_ESTATE_LEAD_DISTRIBUTION_RESPECT_HOURS REAL_ESTATE_LEAD_DISTRIBUTION_SINGLE_AGENT_ID
+            ZAP_FEED_TOKEN ZAP_CONTACT_EMAIL
           ],
           # Organização > Dados da Empresa. ORG_UNIDADES_JSON/ORG_COLORS_JSON hold
           # JSON-stringified arrays (units w/ opening hours, color tokens) — stored
