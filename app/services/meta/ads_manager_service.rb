@@ -935,6 +935,22 @@ class Meta::AdsManagerService
     )
   end
 
+  # Lead de verdade que um formulário instantâneo gerou — chamado pelo
+  # Meta::LeadAds::ImportService quando o webhook `leadgen` avisa que um
+  # novo veio. A Graph API devolve ad_name/adset_name/campaign_name direto
+  # nesse endpoint (não precisa de 3 chamadas separadas como fazia o fluxo
+  # n8n antigo).
+  def lead_detail(page_id:, leadgen_id:)
+    token = resolve_page_token(page_id)
+    return token unless token.success
+
+    get(
+      "/#{leadgen_id}",
+      { fields: 'id,created_time,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,field_data,platform' },
+      token.data
+    )
+  end
+
   def update_leadgen_form_status(page_id:, form_id:, status:)
     token = resolve_page_token(page_id)
     return token unless token.success
