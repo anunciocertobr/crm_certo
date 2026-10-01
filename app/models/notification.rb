@@ -38,7 +38,8 @@ class Notification < ApplicationRecord
     pipeline_task_assigned: 20,
     pipeline_task_due_soon: 21,
     pipeline_task_overdue: 22,
-    pipeline_task_completed: 23
+    pipeline_task_completed: 23,
+    marketing_goal_out_of_margin: 30
   }.freeze
 
   enum :notification_type, NOTIFICATION_TYPES
@@ -81,6 +82,8 @@ class Notification < ApplicationRecord
 
   # rubocop:disable Metrics/MethodLength
   def push_message_title
+    return "#{primary_actor.name}: meta fora da margem" if notification_type == 'marketing_goal_out_of_margin' && primary_actor.respond_to?(:name)
+
     notification_title_map = {
       'conversation_creation' => 'notifications.notification_title.conversation_creation',
       'conversation_assignment' => 'notifications.notification_title.conversation_assignment',
@@ -120,9 +123,25 @@ class Notification < ApplicationRecord
     when 'conversation_assignment'
       return '' unless conversation&.respond_to?(:messages)
       message_body((conversation.messages.incoming.last || conversation.messages.outgoing.last))
+    when 'marketing_goal_out_of_margin'
+      marketing_goal_out_of_margin_body
     else
       ''
     end
+  end
+
+  # `meta` guarda o instantâneo do dia (conta, custo/resultado real, margem
+  # configurada) na hora da criação — não dá pra derivar isso só da
+  # associação com o MarketingClientGoal (um goal pode ter várias contas), e
+  # ir buscar de novo na Meta Graph API aqui seria caro e mudaria com o tempo.
+  def marketing_goal_out_of_margin_body
+    account = meta&.dig('account_name')
+    cost = meta&.dig('cost_per_result')
+    min = meta&.dig('margin_min')
+    max = meta&.dig('margin_max')
+    return '' if cost.nil?
+
+    "#{account}: custo por resultado R$ #{format('%.2f', cost)} (meta R$ #{min}–R$ #{max})"
   end
 
   def conversation

@@ -92,7 +92,8 @@ module MarketingClientGoalSerializer
       cost_margin_weekly_min: objective['cost_margin_weekly_min'],
       cost_margin_weekly_max: objective['cost_margin_weekly_max'],
       cost_margin_monthly_min: objective['cost_margin_monthly_min'],
-      cost_margin_monthly_max: objective['cost_margin_monthly_max']
+      cost_margin_monthly_max: objective['cost_margin_monthly_max'],
+      notify_when_out_of_goal: notify_when_out_of_goal(objective)
     }
   end
 
@@ -121,6 +122,7 @@ module MarketingClientGoalSerializer
       cost_margin_weekly_max: objective['cost_margin_weekly_max'],
       cost_margin_monthly_min: objective['cost_margin_monthly_min'],
       cost_margin_monthly_max: objective['cost_margin_monthly_max'],
+      notify_when_out_of_goal: notify_when_out_of_goal(objective),
       status: {
         trackable: latest.present? && !latest.within_margin.nil?,
         last_date: latest&.date&.iso8601,
@@ -130,6 +132,13 @@ module MarketingClientGoalSerializer
         observation: build_observation(objective, latest, streak)
       }
     }
+  end
+
+  # Objetivos salvos antes deste campo existir não têm a chave — mostra
+  # ligado por padrão (mesmo default usado por
+  # Marketing::GoalOutOfMarginNotifierService ao decidir se notifica).
+  def notify_when_out_of_goal(objective)
+    objective.key?('notify_when_out_of_goal') ? objective['notify_when_out_of_goal'] : true
   end
 
   def build_observation(objective, latest, streak)

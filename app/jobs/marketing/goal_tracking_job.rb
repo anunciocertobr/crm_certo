@@ -8,6 +8,7 @@ module Marketing
     def perform(date: Date.yesterday)
       Marketing::GoalTrackingService.call(date: date)
       Marketing::DailyAlertService.call(date: date)
+      Marketing::GoalOutOfMarginNotifierService.call(date: date)
     end
   end
 end

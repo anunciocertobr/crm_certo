@@ -52,6 +52,7 @@ module Api
           cost_margin_daily_min cost_margin_daily_max
           cost_margin_weekly_min cost_margin_weekly_max
           cost_margin_monthly_min cost_margin_monthly_max
+          notify_when_out_of_goal
         ].freeze
 
         def fetch_goal
