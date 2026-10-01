@@ -20,6 +20,11 @@ module Api
             MARKETING_ALERTS_CHANNELS MARKETING_ALERTS_INBOX_ID
             MARKETING_ALERTS_WHATSAPP_NUMBER MARKETING_ALERTS_EMAIL
           ],
+          # Contatos > Contatos Google — liga/desliga Contact#auto_save_to_google_contacts
+          # (ver Google::AutoSaveContactJob). A conexão OAuth em si é por
+          # Integrations::Hook(app_id: 'google_workspace'), não por aqui —
+          # este grupo só guarda a preferência de "salvar sozinho ou não".
+          'google_contacts' => %w[GOOGLE_CONTACTS_AUTO_SAVE],
           # Meta::ConversionsApiService — envio server-side de eventos (Lead,
           # Purchase, qualificação) a partir de mensagens do WhatsApp.
           # PAGE_ID é a Página do Facebook do WhatsApp Business Account (fixo

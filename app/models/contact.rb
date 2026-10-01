@@ -76,7 +76,8 @@ class Contact < ApplicationRecord
   before_validation :prepare_contact_attributes, :ensure_location_present
   before_save :ensure_location_present
   # after_create_commit :dispatch_create_event # Disabled - using Wisper events instead
-  after_create_commit :ip_lookup, :publish_contact_created, :assign_to_default_pipeline, :trigger_contact_created_automation
+  after_create_commit :ip_lookup, :publish_contact_created, :assign_to_default_pipeline, :trigger_contact_created_automation,
+                      :auto_save_to_google_contacts
   # after_update_commit :dispatch_update_event # Disabled - using Wisper events instead
   after_update_commit :publish_contact_updated, :publish_custom_attribute_changes, :publish_label_changes,
                       :trigger_contact_updated_automation
@@ -515,6 +516,18 @@ class Contact < ApplicationRecord
     default_pipeline.add_contact(self, nil, nil)
   rescue StandardError => e
     Rails.logger.error "Failed to add contact #{id} to default pipeline: #{e.message}"
+  end
+
+  # "Salvar automaticamente no Google Contatos" (Contatos > Contatos
+  # Google) — fora do padrão manual (diff + botão "Adicionar ao Google")
+  # que já existia. Assíncrono: a chamada à People API não deve atrasar a
+  # resposta de quem criou o contato (ex.: webhook do WhatsApp).
+  def auto_save_to_google_contacts
+    return if group?
+    return if phone_number.blank? && email.blank?
+    return unless GlobalConfigService.load('GOOGLE_CONTACTS_AUTO_SAVE', 'false') == 'true'
+
+    Google::AutoSaveContactJob.perform_later(id)
   end
 
   def ensure_pipeline_items_cleanup
