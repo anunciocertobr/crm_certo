@@ -254,7 +254,7 @@ class WhatsappSyncInitiatorJob < ApplicationJob
     Rails.logger.info "[WHATSAPP] Registering phone number for channel #{channel.phone_number}"
 
     response = HTTParty.post(
-      "https://graph.facebook.com/v23.0/#{phone_number_id}/register",
+      "https://graph.facebook.com/v26.0/#{phone_number_id}/register",
       headers: {
         'Authorization' => "Bearer #{access_token}",
         'Content-Type' => 'application/json'
@@ -281,7 +281,7 @@ class WhatsappSyncInitiatorJob < ApplicationJob
     Rails.logger.info "[WHATSAPP] Configuring webhook subscription with fields: #{webhook_fields}"
 
     response = HTTParty.post(
-      "https://graph.facebook.com/v23.0/#{business_account_id}/subscribed_apps",
+      "https://graph.facebook.com/v26.0/#{business_account_id}/subscribed_apps",
       headers: {
         'Authorization' => "Bearer #{access_token}",
         'Content-Type' => 'application/json'
@@ -306,7 +306,7 @@ class WhatsappSyncInitiatorJob < ApplicationJob
     Rails.logger.info "[WHATSAPP] Requesting contact sync for channel #{channel.phone_number}"
 
     response = HTTParty.post(
-      "https://graph.facebook.com/v23.0/#{phone_number_id}/smb_app_data",
+      "https://graph.facebook.com/v26.0/#{phone_number_id}/smb_app_data",
       headers: {
         'Authorization' => "Bearer #{access_token}",
         'Content-Type' => 'application/json'
@@ -332,7 +332,7 @@ class WhatsappSyncInitiatorJob < ApplicationJob
     Rails.logger.info "[WHATSAPP] Requesting conversation history sync for channel #{channel.phone_number}"
 
     response = HTTParty.post(
-      "https://graph.facebook.com/v23.0/#{phone_number_id}/smb_app_data",
+      "https://graph.facebook.com/v26.0/#{phone_number_id}/smb_app_data",
       headers: {
         'Authorization' => "Bearer #{access_token}",
         'Content-Type' => 'application/json'

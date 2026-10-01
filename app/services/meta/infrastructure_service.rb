@@ -15,7 +15,7 @@ require 'net/http'
 # Meta só concede a poucos parceiros — não fabricamos sucesso quando a API
 # nega; devolvemos o erro real dela pro usuário.
 class Meta::InfrastructureService
-  BASE_URL = 'https://graph.facebook.com/v21.0'
+  BASE_URL = 'https://graph.facebook.com/v26.0'
 
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 

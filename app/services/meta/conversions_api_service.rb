@@ -11,7 +11,7 @@
 # evento mas a atribuição fica mais fraca (só pelo `ph` hasheado).
 module Meta
   class ConversionsApiService
-    BASE_URL = 'https://graph.facebook.com/v23.0'
+    BASE_URL = 'https://graph.facebook.com/v26.0'
 
     Result = Struct.new(:success, :data, :error, keyword_init: true)
 

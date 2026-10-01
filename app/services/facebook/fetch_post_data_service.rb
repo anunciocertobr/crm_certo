@@ -36,7 +36,7 @@ class Facebook::FetchPostDataService
     basic_fields = 'id,message,created_time,permalink_url,from'
     Rails.logger.info("Facebook::FetchPostDataService: Fetching post data for #{post_id} with fields: #{basic_fields}")
 
-    url = "https://graph.facebook.com/v3.2/#{post_id}"
+    url = "https://graph.facebook.com/v26.0/#{post_id}"
     params = {
       fields: basic_fields,
       access_token: channel.page_access_token

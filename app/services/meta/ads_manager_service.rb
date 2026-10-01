@@ -17,7 +17,7 @@ require 'digest'
 # posição, campos "dados campanhas"/"insights", body.success) — o HTML só
 # trocou a URL que chama, a lógica de renderização é a mesma.
 class Meta::AdsManagerService
-  BASE_URL = 'https://graph.facebook.com/v23.0'
+  BASE_URL = 'https://graph.facebook.com/v26.0'
 
   # Campos que a UI de edição realmente expõe — nunca repassa o `edicao` cru
   # pra API sem passar por este filtro, mesmo a origem sendo confiável

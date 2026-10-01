@@ -2,7 +2,7 @@ require 'net/http'
 
 # Meta::AdsInsightsService - substitui o workflow n8n "Relatorio meta webhook"
 # (Meta Geral/hora/idade_genero/regiao/posicionamento) chamando a Graph API
-# Marketing (v23.0) direto, usando o user_access_token de longa duração já
+# Marketing (v26.0) direto, usando o user_access_token de longa duração já
 # salvo em Channel::FacebookPage (mesma conexão usada pro canal de
 # mensagens — precisa ter sido reautorizada com o escopo `ads_read`, ver
 # FacebookChannelForm.tsx).
@@ -11,7 +11,7 @@ require 'net/http'
 # anúncios — o `ad_account_id` é passado em cada chamada porque uma mesma
 # Business Manager pode ter várias contas de anúncio.
 class Meta::AdsInsightsService
-  BASE_URL = 'https://graph.facebook.com/v23.0'
+  BASE_URL = 'https://graph.facebook.com/v26.0'
 
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 

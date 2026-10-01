@@ -163,7 +163,7 @@ class Facebook::Moderation::ActionExecutorService
   end
 
   def delete_comment_via_api(comment_id, channel)
-    url = "https://graph.facebook.com/v18.0/#{comment_id}"
+    url = "https://graph.facebook.com/v26.0/#{comment_id}"
     params = {
       access_token: channel.page_access_token
     }
@@ -210,7 +210,7 @@ class Facebook::Moderation::ActionExecutorService
   end
 
   def get_comment_author_id(comment_id, channel)
-    url = "https://graph.facebook.com/v18.0/#{comment_id}"
+    url = "https://graph.facebook.com/v26.0/#{comment_id}"
     params = {
       fields: 'from',
       access_token: channel.page_access_token
@@ -242,7 +242,7 @@ class Facebook::Moderation::ActionExecutorService
   def block_user_via_api(user_id, channel)
     # Block user using Facebook Graph API
     # Note: This requires page access token with appropriate permissions
-    url = "https://graph.facebook.com/v18.0/#{channel.page_id}/blocked"
+    url = "https://graph.facebook.com/v26.0/#{channel.page_id}/blocked"
     params = {
       user: user_id,
       access_token: channel.page_access_token

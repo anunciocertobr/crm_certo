@@ -231,7 +231,7 @@ class Channel::Whatsapp < ApplicationRecord
 
     # ref https://developers.facebook.com/docs/whatsapp/business-platform/webhooks#subscription
     HTTParty.post(
-      "https://graph.facebook.com/v23.0/#{provider_config['waba_id']}/subscribed_apps",
+      "https://graph.facebook.com/v26.0/#{provider_config['waba_id']}/subscribed_apps",
       headers: {
         'Authorization' => "Bearer #{provider_config['api_key']}",
         'Content-Type' => 'application/json'
@@ -249,7 +249,7 @@ class Channel::Whatsapp < ApplicationRecord
     return unless provider_config['waba_id'].present? && provider_config['api_key'].present?
 
     HTTParty.delete(
-      "https://graph.facebook.com/v23.0/#{provider_config['waba_id']}/subscribed_apps",
+      "https://graph.facebook.com/v26.0/#{provider_config['waba_id']}/subscribed_apps",
       headers: {
         'Authorization' => "Bearer #{provider_config['api_key']}",
         'Content-Type' => 'application/json'
