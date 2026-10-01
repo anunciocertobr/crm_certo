@@ -4,6 +4,7 @@ require 'tempfile'
 module Whatsapp::EvolutionGoHandlers::MessagesUpsert
   include Whatsapp::EvolutionGoHandlers::Helpers
   include Whatsapp::EvolutionGoHandlers::ProfilePictureHandler
+  include Whatsapp::EvolutionGoHandlers::ContentHandlers
 
   private
 
@@ -244,6 +245,8 @@ module Whatsapp::EvolutionGoHandlers::MessagesUpsert
 
     # Notify like Evolution v2
     inbox.channel.received_messages([@message], @message.conversation) if incoming?
+
+    handle_ad_referral
   end
 
   def build_message_attributes(conversation, reply_to_id = nil)

@@ -842,6 +842,7 @@ Rails.application.routes.draw do
             patch :move_to_stage
             patch :update_custom_fields
             patch :update_conversation
+            patch :qualify
           end
           collection do
             patch :bulk_move

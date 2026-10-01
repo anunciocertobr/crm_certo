@@ -33,6 +33,11 @@
 class PipelineItem < ApplicationRecord
   include Wisper::Publisher
 
+  # Botão "Qualificar Lead" no Kanban (ver Meta::ConversionsApiService pro
+  # envio do sinal de qualidade pra Meta, que lê este valor OU lead_score,
+  # dependendo de META_CONVERSIONS_LEAD_QUALITY_MODE em GlobalConfigService).
+  LEAD_QUALITIES = %w[baixa media alta].freeze
+
   belongs_to :pipeline
   belongs_to :pipeline_stage
   belongs_to :conversation, optional: true
@@ -57,6 +62,8 @@ class PipelineItem < ApplicationRecord
                                             message: 'already has an active journey in this pipeline' }, allow_nil: true
   validates :contact_id, uniqueness: { scope: :pipeline_id, conditions: -> { where(completed_at: nil) },
                                        message: 'already has an active journey in this pipeline' }, allow_nil: true
+  validates :lead_quality, inclusion: { in: LEAD_QUALITIES }, allow_nil: true
+  validates :lead_score, numericality: { only_integer: true, greater_than_or_equal_to: 1, less_than_or_equal_to: 100 }, allow_nil: true
   validate :must_have_conversation_or_contact
   validate :validate_custom_fields_structure
   validate :validate_task_item_type
@@ -80,11 +87,28 @@ class PipelineItem < ApplicationRecord
   after_update_commit :broadcast_stage_update_to_evo_flow, if: :saved_change_to_pipeline_stage_id?
   after_update :publish_pipeline_item_updated
   after_update :publish_pipeline_item_completed, if: :saved_change_to_completed_at?
+  after_update_commit :send_lead_quality_to_meta, if: :saved_change_to_lead_quality?
   after_destroy :publish_pipeline_item_deleted
 
   scope :in_stage, ->(stage) { where(pipeline_stage: stage) }
   scope :active, -> { where(completed_at: nil) }
   scope :completed, -> { where.not(completed_at: nil) }
+  scope :qualified, -> { where.not(lead_quality: nil) }
+
+  # Botão "Qualificar Lead" — atualiza os 4 campos de uma vez e marca
+  # `lead_qualified_at` (usado pro badge "qualificado há Xd" no Kanban).
+  # `quality:` nil é válido (voltar pra "não definida"), mas aí `score:`
+  # também devia vir nil — não validamos essa combinação aqui, quem decide é
+  # a tela (ver ClientGoalsPage-style: o botão sempre manda os 4 campos juntos).
+  def qualify!(quality:, score: nil, objection: nil, observation: nil)
+    update!(
+      lead_quality: quality.presence,
+      lead_score: score,
+      lead_objection: objection,
+      lead_observation: observation,
+      lead_qualified_at: Time.current
+    )
+  end
 
   def move_to_stage(new_stage, _moved_by = nil)
     return false if new_stage.pipeline != pipeline
@@ -242,7 +266,12 @@ class PipelineItem < ApplicationRecord
       entered_at: entered_at.to_i,
       completed_at: completed_at&.to_i,
       days_in_pipeline: days_in_pipeline,
-      services_total: services_total_value
+      services_total: services_total_value,
+      lead_quality: lead_quality,
+      lead_score: lead_score,
+      lead_objection: lead_objection,
+      lead_observation: lead_observation,
+      lead_qualified_at: lead_qualified_at&.to_i
     }
   end
 
@@ -263,7 +292,12 @@ class PipelineItem < ApplicationRecord
       created_at: created_at,
       updated_at: updated_at,
       conversation: conversation&.webhook_data,
-      contact: contact&.webhook_data
+      contact: contact&.webhook_data,
+      lead_quality: lead_quality,
+      lead_score: lead_score,
+      lead_objection: lead_objection,
+      lead_observation: lead_observation,
+      lead_qualified_at: lead_qualified_at
     }
   end
 
@@ -475,6 +509,13 @@ class PipelineItem < ApplicationRecord
       Time.zone.now,
       pipeline_item: self
     )
+  end
+
+  # Assíncrono: resolver o ctwa_clid (WhatsappAdLead) e montar/enviar o
+  # evento CAPI pode envolver uma chamada HTTP pra Graph API (pixel/dataset
+  # do anúncio) — não queremos isso na request que salvou a qualificação.
+  def send_lead_quality_to_meta
+    Meta::SendLeadQualityJob.perform_later(id)
   end
 
   public

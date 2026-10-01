@@ -20,6 +20,15 @@ module Api
             MARKETING_ALERTS_CHANNELS MARKETING_ALERTS_INBOX_ID
             MARKETING_ALERTS_WHATSAPP_NUMBER MARKETING_ALERTS_EMAIL
           ],
+          # Meta::ConversionsApiService — envio server-side de eventos (Lead,
+          # Purchase, qualificação) a partir de mensagens do WhatsApp.
+          # PAGE_ID é a Página do Facebook do WhatsApp Business Account (fixo
+          # por instalação, não varia por anúncio); DEFAULT_PIXEL_ID é usado
+          # quando o anúncio não tem um pixel associado via tracking_specs.
+          'meta_conversions' => %w[
+            META_CONVERSIONS_ENABLED META_CONVERSIONS_PAGE_ID
+            META_CONVERSIONS_DEFAULT_PIXEL_ID META_CONVERSIONS_LEAD_QUALITY_MODE
+          ],
           'facebook' => %w[FB_APP_ID FB_VERIFY_TOKEN FB_APP_SECRET FACEBOOK_API_VERSION
                            ENABLE_MESSENGER_CHANNEL_HUMAN_AGENT FB_FEED_COMMENTS_ENABLED],
           'whatsapp' => %w[WP_APP_ID WP_VERIFY_TOKEN WP_APP_SECRET WP_WHATSAPP_CONFIG_ID WP_API_VERSION],

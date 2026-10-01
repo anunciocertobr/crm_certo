@@ -1,4 +1,6 @@
 module Whatsapp::EvolutionHandlers::ContentHandlers
+  include Whatsapp::AdReferralCapture
+
   def handle_location
     location_msg = @raw_message.dig(:message, :locationMessage)
     return unless location_msg
@@ -42,37 +44,13 @@ module Whatsapp::EvolutionHandlers::ContentHandlers
   def handle_ad_referral
     return unless incoming?
 
-    referral = find_external_ad_reply_info(@raw_message[:message])
-    return if referral.blank?
-
-    WhatsappAdLead.find_or_create_by(conversation_id: @conversation.id, platform: 'meta') do |lead|
-      lead.contact_id = @contact.id
-      lead.message_id = @message.id
-      lead.source_id = referral[:sourceId]
-      lead.source_url = referral[:sourceUrl]
-      lead.source_type = referral[:sourceType]
-      lead.headline = referral[:title]
-      lead.body = referral[:body]
-      lead.media_type = referral[:mediaType]
-      lead.thumbnail_url = referral[:thumbnailUrl]
-      lead.raw_referral = referral
-    end
-  rescue StandardError => e
-    Rails.logger.error "Evolution API: failed to capture ad referral for message #{raw_message_id}: #{e.message}"
-  end
-
-  def find_external_ad_reply_info(node, depth = 0)
-    return nil if depth > 6 || !node.is_a?(Hash)
-
-    direct = node[:externalAdReplyInfo] || node['externalAdReplyInfo']
-    return direct if direct.is_a?(Hash)
-
-    node.each_value do |value|
-      found = find_external_ad_reply_info(value, depth + 1)
-      return found if found
-    end
-
-    nil
+    capture_baileys_ad_referral(
+      node: @raw_message[:message],
+      contact: @contact,
+      conversation: @conversation,
+      message: @message,
+      log_prefix: 'Evolution API'
+    )
   end
 
   def message_content_attributes

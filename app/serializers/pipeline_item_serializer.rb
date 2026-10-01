@@ -48,9 +48,21 @@ module PipelineItemSerializer
     end
   end
 
+  # Batch pra serializar coleções sem 1 query de WhatsappAdLead por item —
+  # mesma ideia de task_counts_for acima. O mais recente por contato vence
+  # (um contato pode ter clicado em mais de um anúncio ao longo do tempo;
+  # o card de lead reflete a atribuição mais recente).
+  def ad_attribution_for(items)
+    contact_ids = items.filter_map { |i| i.contact&.id }.uniq
+    return {} if contact_ids.empty?
+
+    WhatsappAdLead.where(contact_id: contact_ids).order(created_at: :desc).group_by(&:contact_id).transform_values(&:first)
+  end
+
   def serialize(pipeline_item, include_entity: false, include_tasks_info: false,
                 include_services_info: false, include_labels: false,
-                labels_by_title: nil, labels_by_id: nil, task_counts_by_item: nil)
+                labels_by_title: nil, labels_by_id: nil, task_counts_by_item: nil,
+                ad_attribution_by_contact: nil)
     is_task = pipeline_item.task_item?
 
     is_orphaned = if is_task
@@ -80,8 +92,19 @@ module PipelineItemSerializer
       days_in_current_stage: pipeline_item.days_in_current_stage,
       created_at: pipeline_item.created_at&.to_i,
       updated_at: pipeline_item.updated_at&.iso8601,
-      is_orphaned: is_orphaned
+      is_orphaned: is_orphaned,
+      lead_quality: pipeline_item.lead_quality,
+      lead_score: pipeline_item.lead_score,
+      lead_objection: pipeline_item.lead_objection,
+      lead_observation: pipeline_item.lead_observation,
+      lead_qualified_at: pipeline_item.lead_qualified_at&.to_i
     }
+
+    contact_for_attribution = pipeline_item.contact
+    if contact_for_attribution.present?
+      lead = ad_attribution_by_contact ? ad_attribution_by_contact[contact_for_attribution.id] : WhatsappAdLead.where(contact_id: contact_for_attribution.id).order(created_at: :desc).first
+      result[:ad_attribution] = serialize_ad_attribution(lead) if lead.present?
+    end
 
     if is_task
       primary_task = pipeline_item.primary_task
@@ -184,6 +207,33 @@ module PipelineItemSerializer
     result
   end
 
+  # Clique de anúncio (ver Whatsapp::AdReferralCapture) + UTMs — alimenta o
+  # painel "Dados do Lead" e o ícone de origem no card do Kanban.
+  def serialize_ad_attribution(lead)
+    {
+      platform: lead.platform,
+      source_id: lead.source_id,
+      source_type: lead.source_type,
+      source_url: lead.source_url,
+      ctwaclid: lead.ctwaclid,
+      gclid: lead.gclid,
+      headline: lead.headline,
+      body: lead.body,
+      thumbnail_url: lead.thumbnail_url,
+      campaign_id: lead.campaign_id,
+      campaign_name: lead.campaign_name,
+      adset_id: lead.adset_id,
+      adset_name: lead.adset_name,
+      ad_id: lead.ad_id,
+      ad_name: lead.ad_name,
+      utm_source: lead.utm_source,
+      utm_medium: lead.utm_medium,
+      utm_campaign: lead.utm_campaign,
+      utm_content: lead.utm_content,
+      utm_term: lead.utm_term
+    }
+  end
+
   # Serialize collection of PipelineItems
   #
   # @param pipeline_items [Array<PipelineItem>, ActiveRecord::Relation]
@@ -193,6 +243,8 @@ module PipelineItemSerializer
   def serialize_collection(pipeline_items, **options)
     return [] unless pipeline_items
 
-    pipeline_items.map { |item| serialize(item, **options) }
+    items = pipeline_items.to_a
+    options[:ad_attribution_by_contact] ||= ad_attribution_for(items)
+    items.map { |item| serialize(item, **options) }
   end
 end

@@ -13,7 +13,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   # ensure_authorized_user.
   WRITE_ACTIONS = %w[
     create update bulk_move move_conversation
-    move_to_stage update_conversation update_custom_fields
+    move_to_stage update_conversation update_custom_fields qualify
   ].freeze
 
   # Card writes authorize via Pundit (PipelinePolicy#update_items?), not the
@@ -23,7 +23,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   EvoPermissionConcern.register_permission_key('pipeline_items.update')
 
   before_action :set_pipeline
-  before_action :set_pipeline_item, only: [:update, :destroy, :move_to_stage, :update_conversation, :update_custom_fields]
+  before_action :set_pipeline_item, only: [:update, :destroy, :move_to_stage, :update_conversation, :update_custom_fields, :qualify]
   before_action :ensure_authorized_user
   # Last in the chain: a caller without write permission must get 403, not a
   # business-rule 422 telling it the pipeline is archived.
@@ -392,6 +392,31 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     success_response(
       data: { custom_fields: @pipeline_item.custom_fields },
       message: 'Custom fields updated successfully'
+    )
+  rescue ActiveRecord::RecordInvalid => e
+    error_response(
+      ApiErrorCodes::VALIDATION_ERROR,
+      e.message,
+      details: format_validation_errors(e.record.errors),
+      status: :unprocessable_entity
+    )
+  end
+
+  # Botão "Qualificar Lead" do Kanban — grava quality/score/objeção/
+  # observação de uma vez. `quality` em branco é válido (zera a
+  # qualificação); o `after_update_commit` em PipelineItem cuida de avisar a
+  # Meta Conversions API quando `lead_quality` muda de verdade.
+  def qualify
+    @pipeline_item.qualify!(
+      quality: params[:lead_quality],
+      score: params[:lead_score],
+      objection: params[:lead_objection],
+      observation: params[:lead_observation]
+    )
+
+    success_response(
+      data: { pipeline_item: @pipeline_item.push_event_data },
+      message: 'Lead qualification updated successfully'
     )
   rescue ActiveRecord::RecordInvalid => e
     error_response(

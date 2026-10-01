@@ -97,6 +97,33 @@ class Whatsapp::IncomingMessageBaseService
     attach_files
     attach_location if message_type == 'location'
     @message.save!
+    capture_official_ad_referral(message)
+  end
+
+  # Só a API oficial (WhatsApp Business Cloud API) manda um `referral` de
+  # verdade com `ctwa_clid` — a Evolution/Evolution Go (protocolo não-oficial
+  # Baileys) não têm esse campo, por isso usam busca recursiva por
+  # `externalAdReplyInfo` em vez deste método (ver Whatsapp::AdReferralCapture).
+  # Documentação: https://developers.facebook.com/docs/whatsapp/cloud-api/webhooks/payload-examples#received-referral-message
+  def capture_official_ad_referral(message)
+    referral = message[:referral]
+    return if referral.blank? || @conversation.blank?
+
+    WhatsappAdLead.find_or_create_by(conversation_id: @conversation.id, platform: 'meta') do |lead|
+      lead.contact_id = @contact.id
+      lead.message_id = @message.id
+      lead.source_id = referral[:source_id]
+      lead.source_url = referral[:source_url]
+      lead.source_type = referral[:source_type]
+      lead.headline = referral[:headline]
+      lead.body = referral[:body]
+      lead.media_type = referral[:media_type]
+      lead.thumbnail_url = referral[:image_url] || referral[:video_url] || referral[:thumbnail_url]
+      lead.ctwaclid = referral[:ctwa_clid]
+      lead.raw_referral = referral
+    end
+  rescue StandardError => e
+    Rails.logger.error "WhatsApp Cloud API: failed to capture ad referral: #{e.message}"
   end
 
   def set_contact
