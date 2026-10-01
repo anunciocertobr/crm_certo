@@ -42,11 +42,19 @@ class Webhooks::FacebookController < ActionController::API
       Rails.logger.info("Processing #{changes.length} page changes for page #{page_id}")
 
       changes.each do |change|
+        # change['value'] chega como ActionController::Parameters — o
+        # ActiveJob/Sidekiq não serializa isso sem permit (levanta
+        # ActionController::UnfilteredParameters no enqueue, silenciosamente
+        # pro chamador já que a resposta HTTP já foi decidida antes).
+        # to_unsafe_h é seguro aqui: dado confiável do webhook da Meta, não
+        # input de usuário final.
+        value = change['value'].respond_to?(:to_unsafe_h) ? change['value'].to_unsafe_h : change['value']
+
         case change['field']
         when 'feed'
-          Webhooks::FacebookFeedEventsJob.perform_later(change['value'], page_id: page_id)
+          Webhooks::FacebookFeedEventsJob.perform_later(value, page_id: page_id)
         when 'leadgen'
-          Webhooks::FacebookLeadgenEventsJob.perform_later(change['value'], page_id: page_id)
+          Webhooks::FacebookLeadgenEventsJob.perform_later(value, page_id: page_id)
         end
       end
     end
