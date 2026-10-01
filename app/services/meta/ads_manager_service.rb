@@ -951,6 +951,50 @@ class Meta::AdsManagerService
     )
   end
 
+  # Todos os leads já recebidos por um formulário, direto na Graph API — ao
+  # contrário de MetaLeadSubmission (que só guarda o que passou pelo webhook
+  # `leadgen` a partir de hoje), isso cobre o histórico inteiro, inclusive
+  # leads de antes do CRM existir ou de formulários ainda não mapeados.
+  # Pagina até o fim (até MAX_LEAD_PAGES de segurança, 100 por página).
+  MAX_LEAD_PAGES = 50
+
+  def leadgen_form_leads(page_id:, form_id:)
+    token = resolve_page_token(page_id)
+    return token unless token.success
+
+    leads = []
+    url = "#{BASE_URL}/#{form_id}/leads?" + URI.encode_www_form(
+      fields: 'id,created_time,field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name',
+      limit: 100,
+      access_token: token.data
+    )
+
+    MAX_LEAD_PAGES.times do
+      uri = URI(url)
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = true
+      http.read_timeout = 30
+      response = http.request(Net::HTTP::Get.new(uri.request_uri))
+      body = JSON.parse(response.body)
+
+      unless response.code.to_i.between?(200, 299)
+        Rails.logger.error "Meta::AdsManagerService: GET /#{form_id}/leads -> #{response.code} #{response.body}"
+        return Result.new(success: false, error: graph_error_message(body, 'Falha ao buscar os leads deste formulário.'))
+      end
+
+      leads.concat(body['data'] || [])
+      next_url = body.dig('paging', 'next')
+      break unless next_url
+
+      url = next_url
+    end
+
+    Result.new(success: true, data: leads)
+  rescue StandardError => e
+    Rails.logger.error "Meta::AdsManagerService: GET /#{form_id}/leads error: #{e.message}"
+    Result.new(success: false, error: 'Erro inesperado ao buscar os leads deste formulário.')
+  end
+
   def update_leadgen_form_status(page_id:, form_id:, status:)
     token = resolve_page_token(page_id)
     return token unless token.success
