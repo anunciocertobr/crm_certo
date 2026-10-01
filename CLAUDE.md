@@ -103,7 +103,12 @@ histórico que já está torto.
      pré-existentes do outro lado não bloqueiam; erro de sintaxe ou
      referência quebrada, sim)
 5. Commit com mensagem detalhada explicando CADA conflito resolvido e por
-   quê. `git push origin main`. Só depois, `bin/deploy_vps.sh both <nota>`.
+   quê. `git push origin main`. Só depois, `bin/deploy_vps.sh both <nota>` —
+   **a partir de uma sessão Claude Code, ver `~/CLAUDE.md` ("Rodando
+   bin/deploy_vps.sh a partir desta sessão") antes de rodar isso: chamar o
+   script direto em primeiro plano via SSH já deixou um deploy pela metade
+   (imagem buildada, serviço não atualizado) por interromper o script no
+   meio.**
 6. Depois do deploy: `curl` checando 200 em
    `https://api-crmcerto.anunciocertobr.com.br/api/v1/global_config`, e se
    o merge envolveu um fix de segurança/estabilidade, confirmar
