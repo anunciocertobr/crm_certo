@@ -2,10 +2,20 @@ class Webhooks::FacebookController < ActionController::API
   # This controller handles page object changes from the Facebook webhook —
   # feed (posts/comments) and leadgen (Lead Ads instant forms). The gem
   # facebook-messenger handles messaging events via /bot route separately.
-  # Both fields arrive on the same callback URL/payload, already verified
-  # once in the App's Webhooks product — no GET hub.challenge handler needed
-  # here, subscribing a new field to an existing verified URL doesn't
-  # re-trigger verification.
+  # Both fields arrive on the same callback URL/payload.
+
+  # Handshake Meta exige ao salvar/trocar a URL de callback de Página no App
+  # Dashboard (Webhooks > Page): GET com hub.mode=subscribe, hub.verify_token
+  # e hub.challenge — responder o challenge em texto puro só se o token bater
+  # com o configurado em Admin > app_configs (grupo 'meta_conversions').
+  def verify
+    if params['hub.mode'] == 'subscribe' &&
+       params['hub.verify_token'] == GlobalConfigService.load('META_WEBHOOK_VERIFY_TOKEN', nil)
+      render plain: params['hub.challenge']
+    else
+      head :forbidden
+    end
+  end
 
   def feed_events
     Rails.logger.info('Facebook page webhook received')

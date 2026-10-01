@@ -1007,6 +1007,7 @@ Rails.application.routes.draw do
   end
 
   mount Facebook::Messenger::Server, at: 'bot'
+  get 'webhooks/facebook/feed', to: 'webhooks/facebook#verify'
   post 'webhooks/facebook/feed', to: 'webhooks/facebook#feed_events'
   get 'webhooks/twitter', to: 'api/v1/webhooks#twitter_crc'
   post 'webhooks/twitter', to: 'api/v1/webhooks#twitter_events'
