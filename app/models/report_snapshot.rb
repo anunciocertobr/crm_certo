@@ -29,7 +29,16 @@
 # trocaria a chamada e leria as metas de outras contas.
 class ReportSnapshot < ApplicationRecord
   MARKETING_CLIENT_GOALS = 'marketing_client_goals'.freeze
-  REPORT_TYPES = [MARKETING_CLIENT_GOALS].freeze
+  ADS_REPORTS = 'ads_reports'.freeze
+  REPORT_TYPES = [MARKETING_CLIENT_GOALS, ADS_REPORTS].freeze
+
+  # Teto de contas por link e de janela de datas. São guardas de custo/latência,
+  # não de segurança: o link público é acessado por gente de fora, e N contas ×
+  # período longo vira uma sequência de chamadas à Graph API que estoura o
+  # timeout do proxy nginx e devolve página em branco para o cliente. O dono da
+  # conta, logado no CRM, não tem esse limite.
+  MAX_AD_ACCOUNTS = 12
+  MAX_RANGE_DAYS = 92
 
   # Prazo máximo: um link de relatório com validade de anos na prática é um
   # link sem prazo, e o risco de vazar dado de cliente cresce com o tempo.
@@ -57,6 +66,22 @@ class ReportSnapshot < ApplicationRecord
   # ad_account_ids, que é a restrição que importa).
   def client_goal_ids
     Array(data&.dig('client_goal_ids')).map(&:to_s).reject(&:blank?)
+  end
+
+  # Relatório de anúncios (Meta Ads / Google Ads / GA4) em vez das metas.
+  # Google Ads e GA4 são integração de conta única nesta instalação, então
+  # não são "selecionáveis" como as contas da Meta: entram inteiras ou não
+  # entram, por escolha de quem criou o link.
+  def ads_report?
+    report_type == ADS_REPORTS
+  end
+
+  def include_google_ads?
+    ads_report? && data&.dig('include_google_ads').present?
+  end
+
+  def include_ga4?
+    ads_report? && data&.dig('include_ga4').present?
   end
 
   def revoked?
@@ -96,6 +121,8 @@ class ReportSnapshot < ApplicationRecord
   def validate_ad_account_ids
     if ad_account_ids.empty?
       errors.add(:ad_account_ids, 'selecione ao menos uma conta de anúncio')
+    elsif ad_account_ids.size > MAX_AD_ACCOUNTS
+      errors.add(:ad_account_ids, "selecione no máximo #{MAX_AD_ACCOUNTS} contas por link")
     end
   end
 

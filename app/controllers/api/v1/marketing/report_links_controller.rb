@@ -48,32 +48,72 @@ module Api
 
         def link_params
           params.require(:report_snapshot).permit(
-            :title, :expires_at, :report_type, ad_account_ids: [], client_goal_ids: []
+            :title, :expires_at, :report_type, :include_google_ads, :include_ga4,
+            ad_account_ids: [], client_goal_ids: []
           ).tap do |permitted|
+            # `delete` (e não só ler) é obrigatório: as listas viram `data` e
+            # precisam SAIR dos params, senão ReportSnapshot.new recebe
+            # chaves que o model não tem e levanta UnknownAttributeError.
+            ad_account_ids = Array(permitted.delete(:ad_account_ids))
+            client_goal_ids = Array(permitted.delete(:client_goal_ids))
+            google_ads = permitted.delete(:include_google_ads)
+            ga4 = permitted.delete(:include_ga4)
+
             # O front manda "quantos dias vale o link", não a data final —
             # calcular o expires_at aqui evita cliente com fuso/clock errado
             # criar link que já nasce expirado ou que vive além do pedido.
             permitted[:expires_at] = (validity_days.to_i.days.from_now) if validity_days.present?
             permitted[:report_type] ||= ReportSnapshot::MARKETING_CLIENT_GOALS
             permitted[:data] = {
-              'ad_account_ids' => Array(permitted[:ad_account_ids]),
-              'client_goal_ids' => Array(permitted[:client_goal_ids])
+              'ad_account_ids' => ad_account_ids,
+              'client_goal_ids' => client_goal_ids,
+              'include_google_ads' => truthy?(google_ads),
+              'include_ga4' => truthy?(ga4)
             }
           end
+        end
+
+        def truthy?(value)
+          ActiveModel::Type::Boolean.new.cast(value).present?
         end
 
         def validity_days
           params.dig(:report_snapshot, :valid_days)
         end
 
-        # Ids enviados que não existem em nenhum MarketingClientGoal.
+        # Ids enviados que não existem em lugar nenhum.
+        #
+        # A fonte do "conhecido" depende do tipo do link: no relatório de
+        # anúncios as contas vêm da Graph API (é a tela "Relatórios" que lista
+        # todas), e uma conta pode perfeitamente não estar em nenhum
+        # MarketingClientGoal — validando contra as metas, o dono da conta não
+        # conseguiria criar link para conta que ele acabou de cadastrar.
         def unknown_account_ids
           @unknown_account_ids ||= begin
-            known = MarketingClientGoal.all.flat_map do |goal|
-              Array(goal.ad_accounts).map { |acc| acc['id'].to_s }
-            end
+            known = if @link&.ads_report?
+                      known_meta_ad_accounts
+                    else
+                      Array(MarketingClientGoal.all.flat_map { |g| Array(g.ad_accounts).map { |a| a['id'].to_s } })
+                    end
             Array(@link&.ad_account_ids).map(&:to_s) - known
           end
+        end
+
+        def known_meta_ad_accounts
+          result = Meta::AdsInsightsService.new.ad_accounts
+          unless result.success
+            # Sem lista de contas não dá para validar o que o dono escolheu;
+            # melhor gravar o link do que recusar por causa de falha do
+            # Instagram — a restrição real (só as contas do link são lidas)
+            # é garantida pelo AdsReportsPayload de qualquer forma.
+            Rails.logger.warn("[ReportLinksController] ad_accounts indisponível: #{result.error}")
+            return Array(@link&.ad_account_ids).map(&:to_s)
+          end
+
+          Array(result.data).map { |a| (a['account_id'] || a['id'].to_s.delete_prefix('act_')).to_s }
+        rescue StandardError => e
+          Rails.logger.warn("[ReportLinksController] ad_accounts exception: #{e.class}: #{e.message}")
+          Array(@link&.ad_account_ids).map(&:to_s)
         end
 
         def serialize_link(link)

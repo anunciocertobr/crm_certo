@@ -27,23 +27,38 @@ class Public::Api::V1::ReportLinksController < PublicController
     {
       link: {
         title: link.title,
+        report_type: link.report_type,
         expires_at: link.expires_at&.iso8601,
         days_left: link.days_left
-      },
-      # Só as metas ativas que o link inclui. `client_goal_ids` vazio = todas,
-      # que ainda passam pelo filtro de contas abaixo.
-      goals: scoped_goals(link).filter_map do |goal|
-        serialized = MarketingClientGoalSerializer.serialize(
-          goal,
-          ad_account_ids: link.ad_account_ids,
-          include_changelog: false
-        )
-        # Meta que ficou sem nenhuma conta visível NÃO entra na resposta: sem
-        # esta linha, o nome do cliente, os segmentos e o meta_budget dela
-        # vazariam pelo link de outro cliente.
-        serialized if serialized[:ad_accounts].any?
-      end
-    }
+      }
+    }.merge(link.ads_report? ? ads_reports_payload(link) : { goals: scoped_goals(link).filter_map { |g| visible_goal(g, link) } })
+  end
+
+  # Relatório de anúncios: o serviço decide quais chamadas fazer, sempre a
+  # partir das contas gravadas no link. Datas vêm do visitante (a página deixa
+  # escolher o período) e são normalizadas com teto dentro do serviço.
+  def ads_reports_payload(link)
+    outcome = AdsReportsPayload.call(
+      link,
+      date_start: params[:date_start],
+      date_stop: params[:date_stop]
+    )
+
+    return { error: outcome.error } unless outcome.success
+
+    { report: outcome.data }
+  end
+
+  def visible_goal(goal, link)
+    serialized = MarketingClientGoalSerializer.serialize(
+      goal,
+      ad_account_ids: link.ad_account_ids,
+      include_changelog: false
+    )
+    # Meta que ficou sem nenhuma conta visível NÃO entra na resposta: sem
+    # esta linha, o nome do cliente, os segmentos e o meta_budget dela
+    # vazariam pelo link de outro cliente.
+    serialized if serialized[:ad_accounts].any?
   end
 
   def scoped_goals(link)
