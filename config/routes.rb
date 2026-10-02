@@ -84,6 +84,11 @@ Rails.application.routes.draw do
       namespace :marketing do
         resources :client_goals
         resources :google_ads_assets, only: %i[index create update destroy]
+        resources :report_links, only: %i[index create] do
+          member do
+            patch :revoke
+          end
+        end
         resources :alerts, only: [:index] do
           member do
             patch :mark_read
@@ -960,6 +965,9 @@ Rails.application.routes.draw do
         end
 
         resources :leads, only: [:create]
+
+        # Link público de relatório: o token na URL é a credencial, sem API key.
+        get 'report_links/:token', to: 'report_links#show', as: :report_link
 
         # Anonymous lead-capture forms (B14.01): resolved by public slug, no API key.
         get  'forms/:slug',             to: 'forms#show'

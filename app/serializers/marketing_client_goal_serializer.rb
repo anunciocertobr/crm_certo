@@ -14,7 +14,18 @@ module MarketingClientGoalSerializer
     'outro' => 'Outro'
   }.freeze
 
-  def serialize(goal, detailed: false)
+  # ad_account_ids: quando informado (lista de ids), serializa SÓ essas contas
+  # de anúncio — é o filtro do link público de relatório, aplicado aqui no
+  # servidor justamente para não depender do front. Quando nil, serializa todas
+  # (comportamento original, usado pelas rotas autenticadas).
+  # include_changelog: false esconde o changelog, que é anotação interna da
+  # equipe e não faz sentido num relatório que o cliente final lê.
+  def serialize(goal, detailed: false, ad_account_ids: nil, include_changelog: true)
+    allowed_accounts = ad_account_ids.nil? ? nil : Array(ad_account_ids).map(&:to_s)
+    accounts = (goal.ad_accounts || []).select do |acc|
+      allowed_accounts.nil? || allowed_accounts.include?(acc['id'].to_s)
+    end
+
     {
       id: goal.id,
       name: goal.name,
@@ -22,8 +33,8 @@ module MarketingClientGoalSerializer
       sales_channel: goal.sales_channel,
       meta_budget: goal.meta_budget.to_f,
       active: goal.active,
-      ad_accounts: (goal.ad_accounts || []).map { |acc| serialize_ad_account(goal, acc) },
-      changelog: (goal.changelog || []).sort_by { |c| c['change_date'].to_s }.reverse,
+      ad_accounts: accounts.map { |acc| serialize_ad_account(goal, acc) },
+      changelog: include_changelog ? (goal.changelog || []).sort_by { |c| c['change_date'].to_s }.reverse : [],
       created_at: goal.created_at&.iso8601,
       updated_at: goal.updated_at&.iso8601
     }
