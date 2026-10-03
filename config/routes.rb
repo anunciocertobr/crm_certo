@@ -990,6 +990,21 @@ Rails.application.routes.draw do
         post 'meta_client/criativos/:grant/gerar_textos', to: 'meta_client/criativos#gerar_textos'
         get 'meta_client/criativos/:grant/ai_models/:provider', to: 'meta_client/criativos#ai_models'
 
+        # Relatório de anúncios compartilhado (o HTML de Dashboard › Relatórios
+        # servido a um cliente, sem login e sem PAT no navegador). A credencial
+        # é o token do link e TODAS estas rotas conferem a conta pedida contra
+        # as contas marcadas — filtrar no front não restringe nada, já que o
+        # cliente troca a chamada pelo devtools.
+        namespace :reports do
+          get 'meta_ads/insights', to: 'meta_ads#insights'
+          get 'meta_ads/accounts', to: 'meta_ads#accounts'
+          get 'meta_ads/business_managers', to: 'meta_ads#business_managers'
+          get 'google_ads/insights', to: 'integrations#google_insights'
+          get 'analytics/properties', to: 'integrations#analytics_properties'
+          get 'analytics/overview', to: 'integrations#analytics_overview'
+          get 'analytics/by_channel', to: 'integrations#analytics_by_channel'
+        end
+
         # Anonymous public chat page (B14.03): resolved by slug, returns website_token.
         get 'chat_pages/:slug', to: 'chat_pages#show'
 
@@ -1012,6 +1027,13 @@ Rails.application.routes.draw do
         resources :csat_survey, only: [:show, :update]
       end
     end
+
+    # Página HTML do relatório compartilhado — fica FORA de /public/api porque
+    # responde HTML, não JSON. É o mesmo item `dashboard-menu-items` do
+    # Dashboard, com o PAT trocado pelo token do link (ver Public::ReportHtml).
+    # O nginx do CRM aponta /r/ para cá para o link continuar abrindo no mesmo
+    # domínio do app Android.
+    get 'r/:token', to: 'report_pages#show', defaults: { format: 'html' }
   end
 
   mount Facebook::Messenger::Server, at: 'bot'
