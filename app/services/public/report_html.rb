@@ -118,10 +118,15 @@ TOKEN_CONST_ERROR =
     #   "selecione uma conta". Precisa ser síncrono aqui no head: se a
     #   atribuição ficasse para DOMContentLoaded, o script do relatório já
     #   teria lido o cookie vazio.
-    # - bloqueia escrita no navegador. O relatório tem células editáveis que
+#    - bloqueia escrita no navegador. O relatório tem células editáveis que
     #   fazem PATCH em /whatsapp_ad_leads/:id e um link público não pode
     #   alterar nada. É defesa em profundidade: a rota pública de escrita nem
     #   existe (404), mas o cliente receberia um 403 em vez de um erro seco.
+    # - responde vazio para /whatsapp_ad_leads. A aba de Leads já está escondida,
+    #   mas a página carrega esses dados na inicialização e, sem rota pública,
+    #   o 404 aparecia como um "Erro ao carregar dados dos Leads" bem no topo
+    #   para o cliente. `processLeadsData` do HTML espera um array, então `[]`
+    #   some com o banner sem inventar dado de lead.
     # - esconde a aba de Leads, que traz nome e telefone de clientes.
     def inject_bootstrap(html)
       script = <<~JS
@@ -142,6 +147,12 @@ TOKEN_CONST_ERROR =
                 JSON.stringify({ error: 'Relatório somente leitura.' }),
                 { status: 403, headers: { 'Content-Type': 'application/json' } }
               ));
+            }
+            var href = typeof input === 'string' ? input : (input && input.url);
+            if (href && href.indexOf('/whatsapp_ad_leads') !== -1) {
+              return Promise.resolve(new Response('[]', {
+                status: 200, headers: { 'Content-Type': 'application/json' }
+              }));
             }
             return nativeFetch(input, opts);
           };

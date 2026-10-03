@@ -39,7 +39,18 @@ module Public
           end
 
           def presented_token
-            token = request.headers['api_access_token'].presence ||
+            # Header COM UNDERSCORE não passa pela normalização CGI do Rails.
+            # `ActionDispatch::Http::Headers#env_name` só converte para `HTTP_*`
+            # o que casa com /\A[a-zA-Z][a-zA-Z0-9-]*\z/ — "api_access_token"
+            # tem underscore, então `headers['api_access_token']` procuraria a
+            # env key literal e devolveria nil em requisição de verdade (só
+            # funciona em teste de integração, que monta a env na mão).
+            #
+            # Por isso a leitura é da env key crua, que é o que o Puma popula —
+            # o mesmo truque que o AccessTokenAuthHelper do app já faz. Sem
+            # isso o relatório inteiro volta 410 no navegador e nenhum gráfico
+            # renderiza.
+            token = request.headers['HTTP_API_ACCESS_TOKEN'].presence ||
                     params[:token].presence ||
                     token_from_authorization_header
             token.to_s

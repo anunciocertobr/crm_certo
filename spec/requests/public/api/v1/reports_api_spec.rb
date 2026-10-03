@@ -81,6 +81,20 @@ RSpec.describe 'API pública do relatório', type: :request do
       expect(response).to have_http_status(:gone)
     end
 
+    # Este teste falhou no navegador depois de a página já estar "funcionando"
+    # nas requests de integração. Header com underscore não passa pela
+    # normalização CGI do Rails (env_name só vira HTTP_* o que casa com
+    # /\A[a-zA-Z][a-zA-Z0-9-]*\z/), então ler `headers['api_access_token']`
+    # devolvia nil em requisição real e o relatório inteiro voltava 410 sem
+    # nenhum gráfico. A env key precisa ser lida crua.
+    it 'aceita o token no header com underscore (env key crua)' do
+      get '/public/api/v1/reports/meta_ads/insights',
+          params: { ad_account_id: allowed_account, date_start: '2026-09-01', date_stop: '2026-09-30' },
+          headers: { 'HTTP_API_ACCESS_TOKEN' => link.token }
+
+      expect(response).to have_http_status(:ok)
+    end
+
     it 'recusa token revogado' do
       link.revoke!
 

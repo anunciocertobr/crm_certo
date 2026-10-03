@@ -99,10 +99,12 @@ RSpec.describe 'Relatório HTML público', type: :request do
       expect(body).to include("accountId: \"#{link.ad_account_ids.first}\"")
     end
 
-    it 'esconde a aba de Leads (nome e telefone de cliente)' do
+    it 'não pede leads e esconde a aba (nome e telefone de cliente)' do
       get "/public/r/#{link.token}"
 
       expect(body).to include("[data-page='leads-dashboard'] { display: none !important; }")
+      expect(body).to include('/whatsapp_ad_leads')
+      expect(body).to include('[]')
     end
 
     it 'bloqueia métodos de escrita no navegador' do
