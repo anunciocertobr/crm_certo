@@ -99,6 +99,12 @@ RSpec.describe 'Relatório HTML público', type: :request do
       expect(body).to include("accountId: \"#{link.ad_account_ids.first}\"")
     end
 
+    it 'abre em Meta Ads, não na aba de Leads que escondemos' do
+      get "/public/r/#{link.token}"
+
+      expect(body).to include("handlePageChange('meta-ads')")
+    end
+
     it 'não pede leads e esconde a aba (nome e telefone de cliente)' do
       get "/public/r/#{link.token}"
 

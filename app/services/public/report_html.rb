@@ -109,25 +109,29 @@ TOKEN_CONST_ERROR =
       html.gsub(API_JOIN, PUBLIC_API_JOIN)
     end
 
-    # Script pequeno inserido logo DEPOIS da tag <head>, antes de qualquer
-    # script do relatório:
+# O que este bootstrap faz, e por quê:
     #
-    # - pré-seleciona a conta do link. O HTML escolhe a conta por cookie
-    #   (`getCookie('metaAdAccountId')`, linha ~494 do original) e um cliente
-    #   novo não tem cookie nenhum — sem isso a página abriria pedindo
-    #   "selecione uma conta". Precisa ser síncrono aqui no head: se a
-    #   atribuição ficasse para DOMContentLoaded, o script do relatório já
-    #   teria lido o cookie vazio.
-#    - bloqueia escrita no navegador. O relatório tem células editáveis que
-    #   fazem PATCH em /whatsapp_ad_leads/:id e um link público não pode
-    #   alterar nada. É defesa em profundidade: a rota pública de escrita nem
-    #   existe (404), mas o cliente receberia um 403 em vez de um erro seco.
-    # - responde vazio para /whatsapp_ad_leads. A aba de Leads já está escondida,
-    #   mas a página carrega esses dados na inicialização e, sem rota pública,
-    #   o 404 aparecia como um "Erro ao carregar dados dos Leads" bem no topo
-    #   para o cliente. `processLeadsData` do HTML espera um array, então `[]`
-    #   some com o banner sem inventar dado de lead.
-    # - esconde a aba de Leads, que traz nome e telefone de clientes.
+    # 1. pré-seleciona a conta do link. O HTML escolhe a conta por cookie
+    #    (`getCookie('metaAdAccountId')`) e um cliente novo não tem cookie
+    #    nenhum. Precisa ser síncrono aqui no head: se ficasse para
+    #    DOMContentLoaded, o script do relatório já teria lido o cookie vazio.
+    #
+    # 2. abre em Meta Ads. A tela original abre em "Leads Dashboard" — aba que
+    #    escondemos aqui por conter nome e telefone de cliente. Sem isto o
+    #    cliente abriria o link numa página sem nenhuma aba visível. Chamar
+    #    handlePageChange mais de uma vez refaz a consulta inteira à Meta, então
+    #    o código abaixo garante uma chamada só.
+    #
+    # 3. bloqueia escrita no navegador. O relatório tem células editáveis que
+    #    fazem PATCH em /whatsapp_ad_leads/:id e um link público não pode alterar
+    #    nada. Defesa em profundidade: a rota pública nem existe (404), mas o
+    #    cliente veria um erro seco.
+    #
+    # 4. responde vazio para /whatsapp_ad_leads. A aba está escondida, mas a
+    #    página carrega esses dados na inicialização e, sem rota pública, o 404
+    #    aparecia como "Erro ao carregar dados dos Leads" no topo da página.
+    #    `processLeadsData` do HTML espera array, então `[]` some com o banner
+    #    sem inventar dado de lead.
     def inject_bootstrap(html)
       script = <<~JS
         <script data-evo-public-report>
@@ -137,6 +141,33 @@ TOKEN_CONST_ERROR =
             encodeURIComponent(window.__EVO_PUBLIC_REPORT__.accountId || '') +
             '; path=/; SameSite=Lax';
         } catch (e) { /* cookie bloqueado: a página abre sem conta pré-selecionada */ }
+
+        (function () {
+          var switched = false;
+          function openMetaAds() {
+            // Só age se a aba visível não for Meta Ads. Chamar handlePageChange
+            // quando já está em Meta Ads dispara fetchData() e refaz a consulta
+            // inteira à Meta.
+            var active = document.querySelector('.nav-item.active');
+            if (active && active.dataset.page === 'meta-ads') return true;
+            if (typeof handlePageChange !== 'function') return false;
+            if (!switched) { switched = true; handlePageChange('meta-ads'); }
+            return true;
+          }
+          // `load`, e não DOMContentLoaded: o relatório também escuta
+          // DOMContentLoaded e chama handlePageChange('leads-dashboard') no fim
+          // do callback. Quem registra primeiro roda primeiro, então um
+          // listener em DOMContentLoaded seria sobrescrito em seguida.
+          window.addEventListener('load', function () {
+            var tries = 0;
+            (function tick() {
+              if (openMetaAds()) return;
+              if (++tries > 30) return;
+              setTimeout(tick, 400);
+            })();
+          });
+        })();
+
         (function () {
           var nativeFetch = window.fetch.bind(window);
           window.fetch = function (input, init) {
