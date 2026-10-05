@@ -455,6 +455,80 @@ Rails.application.routes.draw do
       # Chat-page builder admin CRUD (B14.08).
       resources :chat_pages, only: [:index, :create, :show, :update, :destroy], controller: 'chat_pages'
 
+      # Cursos — marketplace global. Vitrine/inscricao/progresso sao do aluno;
+      # `creator/` e a area de quem publica (perfil, cursos, modulos, aulas e a
+      # fila de aprovacao de compra, ja que nao ha gateway de pagamento).
+      #
+      # `rows` responde a home inteira em uma request so: a tela "Netflix" abre
+      # com as linhas ja filtradas em vez de disparar 8 chamadas.
+      # `param: :slug`: o controller busca por slug (Course.find_by!(slug:)),
+      # entao a rota precisa entregar o mesmo param — sem isso `params[:slug]`
+      # chega nil e toda URL de curso quebra.
+      resources :courses, only: [:index, :show], param: :slug, controller: 'courses' do
+        collection do
+          get :rows
+        end
+
+        member do
+          post :enroll, to: 'course_enrollments#create'
+          post :wishlist, to: 'course_wishlists#create'
+          delete :wishlist, to: 'course_wishlists#destroy'
+        end
+      end
+
+      # Seguir e do VENDEDOR, nao do curso. Aninhado em `courses`, o :slug
+      # chegando no CreatorFollowsController seria o slug do curso e o
+      # find_by! de perfil nunca encontraria o criador.
+      resources :creators, only: [:index, :show], controller: 'creators' do
+        member do
+          post :follow, to: 'creator_follows#create'
+          delete :follow, to: 'creator_follows#destroy'
+        end
+      end
+
+      # "Quem eu sigo" — a linha de cursos de quem o aluno segue.
+      resources :creator_follows, only: [:index], controller: 'creator_follows'
+
+      resources :course_enrollments, only: [:index, :show], controller: 'course_enrollments' do
+        # Upsert de progresso: o player chama a cada ~15s e no pause, entao o
+        # endpoint precisa ser idempotente e aceitar update parcial.
+        put 'lesson_progresses', to: 'lesson_progresses#upsert'
+      end
+
+      # Recurso singular (uma senha por aluno). `verify` fica como rota
+      # explicita porque `resource` singular nao aceita bloco `collection`.
+      resource :course_unlock, only: [:show, :create], controller: 'student_course_unlocks'
+      post 'course_unlock/verify', to: 'student_course_unlocks#verify'
+
+      namespace :creator do
+        resource :profile, only: [:show, :update], controller: 'profiles' do
+          post :publish, on: :collection
+          post :unpublish, on: :collection
+        end
+
+        resources :courses, only: [:index, :show, :create, :update, :destroy], param: :slug,
+                   controller: 'courses' do
+          member do
+            post :publish
+            post :unpublish
+          end
+
+          resources :modules, only: [:create, :update, :destroy], controller: 'modules'
+          resources :lessons, only: [:create, :update, :destroy], controller: 'lessons' do
+            collection do
+              post :preview
+            end
+          end
+        end
+
+        resources :purchase_requests, only: [:index], controller: 'purchase_requests' do
+          member do
+            post :approve
+            post :reject
+          end
+        end
+      end
+
       # ERP webhook ingress (EVO-1735 S3.0) — extensible adapter registry,
       # ships with `:noop` only. Adapter for a concrete ERP lands in S3.1
       # when a customer pilot is contracted.
