@@ -88,6 +88,9 @@ docker save "$IMAGE_NAME:$TAG" -o "$TARBALL_LOCAL"
 
 echo "==> Enviando pra VPS..."
 scp -i "$SSH_KEY" "$TARBALL_LOCAL" "$VPS_HOST:/root/$TARBALL_NAME"
+# Remove o tarball em qualquer desfecho (sucesso ou falha): tentativas que falham
+# deixavam ~900 MB em /root e o disco da VPS enchia.
+trap 'rm -f "$TARBALL_LOCAL"; ssh_vps "rm -f /root/$TARBALL_NAME"' EXIT
 ssh_vps "docker load -i /root/$TARBALL_NAME && docker tag $IMAGE_NAME:$TAG $REGISTRY/$IMAGE_NAME:$TAG && docker push $REGISTRY/$IMAGE_NAME:$TAG && rm -f /root/$TARBALL_NAME"
 
 deploy_service() {
