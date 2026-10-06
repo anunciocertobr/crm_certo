@@ -14,7 +14,12 @@ module MetaInsightsRowSerializer
     'onsite_conversion.messaging_conversation_started_7d' => :mensagens,
     'link_click' => :link_click,
     'offsite_conversion.fb_pixel_lead' => :leads_pixel,
-    'lead' => :leads_ads
+    'lead' => :leads_ads,
+    # Compra: o tipo muda conforme o pixel/catálogo. Conta que não tem nenhum
+    # desses eventos continua com 0 (é o dado real, não falha de mapeamento).
+    'offsite_conversion.fb_pixel_purchase' => :compras,
+    'omni_purchase' => :compras,
+    'purchase' => :compras
   }.freeze
 
   module_function
@@ -45,6 +50,7 @@ module MetaInsightsRowSerializer
       'Leads do Pixel' => actions[:leads_pixel],
       'Custo por Leads Pixel' => custo.call(actions[:leads_pixel]),
       'Leads do Meta Ads' => actions[:leads_ads],
+      'Compras' => actions[:compras],
       'Custo por Leads Ads' => custo.call(actions[:leads_ads])
     }
 
@@ -72,7 +78,7 @@ module MetaInsightsRowSerializer
   end
 
   def tally_actions(actions)
-    totals = { mensagens: 0, link_click: 0, leads_pixel: 0, leads_ads: 0 }
+    totals = { mensagens: 0, link_click: 0, leads_pixel: 0, leads_ads: 0, compras: 0 }
     Array(actions).each do |action|
       key = ACTION_TYPES[action['action_type']]
       totals[key] += action['value'].to_i if key
