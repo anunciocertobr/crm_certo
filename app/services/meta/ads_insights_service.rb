@@ -13,7 +13,12 @@ require 'net/http'
 class Meta::AdsInsightsService
   BASE_URL = 'https://graph.facebook.com/v26.0'
 
-  Result = Struct.new(:success, :data, :error, keyword_init: true)
+  Result = Struct.new(:success, :data, :error, :next_url, keyword_init: true)
+
+  # A Graph API devolve no máximo `limit` linhas por página. Sem seguir
+  # `paging.next`, qualquer período com mais de 500 linhas (posicionamento por
+  # dia, por exemplo) vinha cortado e o total do relatório não batia.
+  MAX_PAGES = 100
 
   BREAKDOWNS = {
     'geral' => nil,
@@ -59,7 +64,16 @@ class Meta::AdsInsightsService
     }
     params[:breakdowns] = breakdown if breakdown.present?
 
-    get("/act_#{ad_account_id}/insights", params)
+    result = get("/act_#{ad_account_id}/insights", params)
+    pages = 1
+    while result.success && result.next_url && pages < MAX_PAGES
+      page = request(URI(result.next_url))
+      return page unless page.success # falha no meio: erro, não dado pela metade
+
+      result = Result.new(success: true, data: result.data + page.data, next_url: page.next_url)
+      pages += 1
+    end
+    result
   end
 
   # Lista leve (sem insights) pra popular o seletor de conta no relatório —
@@ -128,7 +142,10 @@ class Meta::AdsInsightsService
   def get(path, params)
     uri = URI("#{BASE_URL}#{path}")
     uri.query = URI.encode_www_form(params)
+    request(uri)
+  end
 
+  def request(uri)
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
     http.read_timeout = 30
@@ -137,13 +154,13 @@ class Meta::AdsInsightsService
     body = JSON.parse(response.body)
 
     unless response.code.to_i.between?(200, 299)
-      Rails.logger.error "Meta::AdsInsightsService: GET #{path} -> #{response.code} #{response.body}"
+      Rails.logger.error "Meta::AdsInsightsService: GET #{uri.path} -> #{response.code} #{response.body}"
       return Result.new(success: false, error: body.dig('error', 'message') || 'Falha ao consultar a Graph API da Meta.')
     end
 
-    Result.new(success: true, data: body['data'] || body)
+    Result.new(success: true, data: body['data'] || body, next_url: body.dig('paging', 'next'))
   rescue StandardError => e
-    Rails.logger.error "Meta::AdsInsightsService: GET #{path} error: #{e.message}"
+    Rails.logger.error "Meta::AdsInsightsService: GET #{uri.path} error: #{e.message}"
     Result.new(success: false, error: 'Erro inesperado ao consultar a Graph API da Meta.')
   end
 end
