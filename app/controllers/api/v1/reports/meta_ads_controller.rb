@@ -7,6 +7,14 @@
 # daqui para que a rota pública do link compartilhado use exatamente o mesmo
 # formato — o cliente não pode ver números diferentes dos do dono da conta.
 class Api::V1::Reports::MetaAdsController < Api::V1::BaseController
+  # `insights` pode precisar de várias páginas da Graph API (ex.: posicionamento
+  # de um mês inteiro) e `business_managers` já estourou o timeout padrão em dias
+  # de servidor lento — ver incidente de 2026-10-07. O timeout padrão do
+  # rack-timeout (15s) é curto demais só pra essas duas; o resto do sistema
+  # continua em 15s. Setar `env['rack-timeout.timeout']` cedo no ciclo da
+  # request (before_action) é o jeito suportado de sobrescrever por request.
+  before_action :extend_timeout_for_meta_api, only: %i[insights business_managers]
+
   def insights
     conteudo = params[:conteudo].presence || 'geral'
     result = Meta::AdsInsightsService.new.campaign_insights(
@@ -44,5 +52,11 @@ class Api::V1::Reports::MetaAdsController < Api::V1::BaseController
     return error_response(ApiErrorCodes::EXTERNAL_SERVICE_ERROR, result.error, status: :bad_gateway) unless result.success
 
     render json: result.data
+  end
+
+  private
+
+  def extend_timeout_for_meta_api
+    request.env['rack-timeout.timeout'] = 45
   end
 end
