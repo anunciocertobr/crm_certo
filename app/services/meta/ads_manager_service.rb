@@ -1679,6 +1679,24 @@ class Meta::AdsManagerService
     )
   end
 
+  # Atualiza um público salvo que já existe — a Graph API aceita POST direto
+  # no node do público salvo (sem passar pela conta), com os mesmos campos
+  # name/targeting usados na criação. Sobrescreve o direcionamento inteiro
+  # (não dá pra fazer PATCH parcial de um único campo do targeting).
+  def update_saved_audience(saved_audience_id:, name:, targeting:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    post("/#{saved_audience_id}", { name: name, targeting: targeting.to_json })
+  end
+
+  # Lê um público salvo específico com o targeting completo — usado pra
+  # abrir o formulário de edição já preenchido (TargetingBuilder.tsx).
+  def saved_audience_detail(saved_audience_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    get("/#{saved_audience_id}", fields: 'id,name,description,targeting')
+  end
+
   private
 
   # Página da campanha. Antes era sempre `Channel::FacebookPage.first` — a

@@ -218,6 +218,14 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
         target_ad_account_id: params.require(:id_conta_destino),
         overrides: overrides
       ))
+    when 'atualizar_publico_salvo'
+      respond(service.update_saved_audience(
+        saved_audience_id: params.require(:id_publico_salvo),
+        name: params.require(:name),
+        targeting: parse_json_object(params[:targeting])
+      ))
+    when 'detalhe_publico_salvo'
+      respond(service.saved_audience_detail(saved_audience_id: params.require(:id_publico_salvo)))
     # --- Listas de direcionamento (locais, não são objeto da Graph API) ---
     when 'listar_listas_direcionamento'
       render json: TargetingList.alphabetical.as_json(only: %i[id name items])
