@@ -25,6 +25,10 @@ class Api::V1::Marketing::GtmController < Api::V1::BaseController
     respond_with(service.create_container(params[:account_id], params[:name], usage_context))
   end
 
+  def destroy_container
+    respond_with(service.delete_container(params[:account_id], params[:container_id]))
+  end
+
   # --- Recursos (tags/acionadores/variáveis/pastas) ---------------------
 
   def create_resource
@@ -45,6 +49,24 @@ class Api::V1::Marketing::GtmController < Api::V1::BaseController
 
   def import_container
     respond_with(service.import_container(params[:account_id], params[:container_id], params[:container_version]))
+  end
+
+  # Roda em background (ver Gtm::CreateContainerFromTemplateJob) — importar
+  # um modelo grande respeitando a cota de escrita do Google leva vários
+  # minutos, tempo longo demais pra segurar a requisição HTTP.
+  def create_from_template
+    fields = params[:fields].present? ? params[:fields].permit!.to_h : {}
+    Gtm::CreateContainerFromTemplateJob.perform_later(
+      account_id: params[:account_id],
+      client_name: params[:client_name],
+      usage_context: params[:usage_context] == 'server' ? 'server' : 'web',
+      fields: fields,
+      sheet_url: params[:sheet_url]
+    )
+    render json: {
+      success: true,
+      message: 'Criação iniciada — importar o modelo inteiro leva alguns minutos. Atualize a lista de contêineres depois.'
+    }
   end
 
   # --- Permissões / compartilhamento -----------------------------------

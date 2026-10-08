@@ -53,6 +53,10 @@ class Google::TagManagerService
     post("/accounts/#{account_id}/containers", { name: name, usageContext: [usage_context] })
   end
 
+  def delete_container(account_id, container_id)
+    delete("/accounts/#{account_id}/containers/#{container_id}")
+  end
+
   # --- Recursos do workspace (tags/acionadores/variáveis/pastas) ---------
   # `resource` é um dos: tags, triggers, variables, folders
 
@@ -99,49 +103,90 @@ class Google::TagManagerService
     version = parse_container_version(container_version_json)
     return version unless version.is_a?(Hash)
 
+    source_container_id = version.dig('container', 'containerId') || container_id
     base = workspace_base(account_id, container_id, workspace_id)
+    recreate_resources(base, version, source_container_id, container_id)
+  end
 
-    folder_map = {}
-    Array(version['folder']).each do |folder|
-      result = post("#{base}/folders", sanitize_resource(folder, folder_map))
-      return result unless result.success
+  # --- Criar contêiner a partir de um modelo pronto ----------------------
+  # Cria um contêiner novo e já importa nele o mesmo conjunto de
+  # tags/acionadores/variáveis/templates de um contêiner-modelo de
+  # referência (web: "0 modelos GTM" / Wordpress Woocommerce GTM4; server:
+  # Vmax Server, usado como referência por já ter a config padrão de
+  # Facebook CAPI + TikTok Events API). IDs/tokens/URL são opcionais — o que
+  # não for informado em `fields` vira o placeholder '0000000000' (ou a URL
+  # de exemplo, pro campo de planilha), pra deixar óbvio que falta preencher
+  # depois no próprio GTM.
+  WEB_TEMPLATE = { account_id: '6264689624', container_id: '203827379' }.freeze
+  SERVER_TEMPLATE = { account_id: '6005383959', container_id: '55224011' }.freeze
+  DEFAULT_PLACEHOLDER = '0000000000'.freeze
+  DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/0000000000/exec'.freeze
 
-      folder_map[folder['folderId']] = result.data['folderId']
+  # Nome exato da variável (type 'c') no contêiner-modelo <- chave que o
+  # formulário do frontend usa pra mandar o valor preenchido pelo usuário.
+  WEB_ID_FIELDS = {
+    'facebook_pixel_id' => '01 FACEBOOK ADS - ID do Pixel (colar ID Pixel Facebook)',
+    'ga4_id' => '02 Google Analytics GA4 - ID (colar ID GA4)',
+    'ua_id' => '03 Google Analytics - UA (colar ID UA)',
+    'google_ads_id' => '04 Google ADS - ID do Pixel',
+    'tiktok_pixel_id' => '05 ID TikTok Pixel (colar ID do TikTok)',
+    'pinterest_id' => '06 ID Pinterest',
+    'linkedin_id' => '07 ID Linkedin',
+    'transport_url_facebook' => '06 API Transporte URL Facebook (colar URL do Servidor Facebook)',
+    'transport_url_tiktok' => '06 API Transporte URL TikTok (colar URL do Servidor TikTok)',
+    'google_ads_label_ver_conteudo' => 'Google ADS - Ver conteudo (código pego na campanha na parte de tag rotulo da conversão)',
+    'google_ads_label_carrinho' => 'Google ADS - carrinho (código pego na campanha na parte de tag rotulo da conversão)',
+    'google_ads_label_checkout' => 'Google ADS - iniciar finalização de compra (código pego na campanha na parte de tag rotulo da conversão)',
+    'google_ads_label_compra' => 'Google ADS - compra (código pego na campanha na parte de tag rotulo da conversão)',
+    'google_ads_label_lead' => 'Google ADS - Lead (código pego na campanha na parte de tag rotulo da conversão)'
+  }.freeze
+
+  SERVER_ID_FIELDS = {
+    'facebook_pixel_id' => 'FACEBOOK PIXEL',
+    'facebook_token' => 'FACEBOOK Token API',
+    'tiktok_pixel_id' => '01 TikTok ID do Pixel (Colar ID do Pixel)',
+    'tiktok_token' => '02 TikTok Token (Colar Token do Pixel)'
+  }.freeze
+
+  def create_container_from_template(account_id, client_name, usage_context, fields = {}, sheet_url = nil)
+    is_server = usage_context == 'server'
+    suffix = is_server ? 'Server' : 'Web'
+    container_result = create_container(account_id, "#{client_name} (#{suffix})", is_server ? 'server' : 'web')
+    return container_result unless container_result.success
+
+    new_container_id = container_result.data['containerId']
+    template_ref = is_server ? SERVER_TEMPLATE : WEB_TEMPLATE
+    field_map = is_server ? SERVER_ID_FIELDS : WEB_ID_FIELDS
+
+    source_ws = workspace(template_ref[:account_id], template_ref[:container_id])
+    return source_ws unless source_ws.success
+
+    variable_values = field_map.each_with_object({}) do |(key, variable_name), acc|
+      acc[variable_name] = fields[key].presence || DEFAULT_PLACEHOLDER
+    end
+    field_overrides = {
+      variable_values: variable_values,
+      sheet_url: is_server ? nil : (sheet_url.presence || DEFAULT_SHEET_URL)
+    }
+
+    dest_workspace_id = default_workspace_id(account_id, new_container_id)
+    unless dest_workspace_id
+      return Result.new(success: false, error: 'Contêiner criado, mas o workspace novo não foi encontrado pra importar o modelo.')
     end
 
-    variable_map = {}
-    Array(version['variable']).each do |variable|
-      result = post("#{base}/variables", sanitize_resource(variable, folder_map))
-      return result unless result.success
+    base = workspace_base(account_id, new_container_id, dest_workspace_id)
+    version = {
+      'folder' => source_ws.data[:folders],
+      'variable' => source_ws.data[:variables],
+      'trigger' => source_ws.data[:triggers],
+      'tag' => source_ws.data[:tags],
+      'template' => source_ws.data[:templates]
+    }
 
-      variable_map[variable['variableId']] = result.data['variableId']
-    end
+    recreate_result = recreate_resources(base, version, template_ref[:container_id], new_container_id, field_overrides)
+    return recreate_result unless recreate_result.success
 
-    trigger_map = {}
-    Array(version['trigger']).each do |trigger|
-      result = post("#{base}/triggers", sanitize_resource(trigger, folder_map))
-      return result unless result.success
-
-      trigger_map[trigger['triggerId']] = result.data['triggerId']
-    end
-
-    tags_imported = 0
-    Array(version['tag']).each do |tag|
-      payload = sanitize_resource(tag, folder_map)
-      payload['firingTriggerId'] = remap_ids(tag['firingTriggerId'], trigger_map) if tag['firingTriggerId']
-      payload['blockingTriggerId'] = remap_ids(tag['blockingTriggerId'], trigger_map) if tag['blockingTriggerId']
-      result = post("#{base}/tags", payload)
-      return result unless result.success
-
-      tags_imported += 1
-    end
-
-    Result.new(success: true, data: {
-                 'folders' => folder_map.size,
-                 'variables' => variable_map.size,
-                 'triggers' => trigger_map.size,
-                 'tags' => tags_imported
-               })
+    Result.new(success: true, data: container_result.data.merge('import' => recreate_result.data))
   end
 
   # --- Permissões / compartilhamento -----------------------------------
@@ -218,6 +263,119 @@ class Google::TagManagerService
 
   def remap_ids(ids, map)
     Array(ids).map { |id| map[id] || id }
+  end
+
+  # Recria pastas/variáveis/acionadores/tags de `version` dentro do
+  # workspace de destino (`base`), na ordem que resolve as dependências:
+  # 1) templates customizados primeiro (tags tipo Facebook CAPI/TikTok
+  #    Events API etc. são baseados neles — sem recriar o template, a tag
+  #    nem consegue ser criada, já que o `type` dela referencia o id do
+  #    template no contêiner de ORIGEM) — reinstala pela galleryReference
+  #    quando veio da galeria (o caso comum), senão copia o templateData.
+  # 2) pastas (pra resolver parentFolderId).
+  # 3) variáveis, acionadores, tags — remapeando qualquer `type` cvt_* pro
+  #    novo id de template e firingTriggerId/blockingTriggerId pro novo id
+  #    de acionador.
+  # `field_overrides` (opcional) permite sobrescrever o valor de variáveis
+  # constantes (`type: 'c'`) pelo NOME e trocar a URL de tags de planilha —
+  # usado por create_container_from_template pra preencher IDs/tokens/URL
+  # na hora de importar, sem precisar de uma segunda rodada de updates.
+  # A cota de escrita do Tag Manager é 30/min por usuário — um contêiner
+  # grande (o modelo tem ~90 tags + ~90 variáveis) facilmente passa disso.
+  # Pausa entre cada chamada de escrita pra não tomar 429 no meio da
+  # importação (confirmado ao vivo: sem pausa, quebra sempre no mesmo
+  # lugar). Por isso quem chama isto pra um contêiner grande (ver
+  # create_container_from_template) roda em background job, não numa
+  # requisição HTTP síncrona — a importação inteira pode levar minutos.
+  RATE_LIMIT_PAUSE = 2.2
+
+  def recreate_resources(base, version, source_container_id, dest_container_id, field_overrides = nil)
+    template_map = {}
+    Array(version['template']).each do |template|
+      # A API exige o código-fonte (templateData) mesmo quando o template
+      # veio da galeria — galleryReference sozinho não basta (confirmado ao
+      # vivo: 400 "Missing section ___INFO___" mandando só a referência).
+      payload = { 'name' => template['name'], 'templateData' => template['templateData'] }
+      payload['galleryReference'] = template['galleryReference'] if template['galleryReference']
+      result = post("#{base}/templates", payload)
+      sleep(RATE_LIMIT_PAUSE)
+      return result unless result.success
+
+      old_type = "cvt_#{source_container_id}_#{template['templateId']}"
+      new_type = "cvt_#{dest_container_id}_#{result.data['templateId']}"
+      template_map[old_type] = new_type
+    end
+    remap_type = ->(type) { template_map[type] || type }
+
+    folder_map = {}
+    Array(version['folder']).each do |folder|
+      result = post("#{base}/folders", sanitize_resource(folder, folder_map))
+      sleep(RATE_LIMIT_PAUSE)
+      return result unless result.success
+
+      folder_map[folder['folderId']] = result.data['folderId']
+    end
+
+    variable_map = {}
+    Array(version['variable']).each do |variable|
+      payload = sanitize_resource(variable, folder_map)
+      payload['type'] = remap_type.call(payload['type'])
+      apply_field_override!(payload, field_overrides)
+      result = post("#{base}/variables", payload)
+      sleep(RATE_LIMIT_PAUSE)
+      return result unless result.success
+
+      variable_map[variable['variableId']] = result.data['variableId']
+    end
+
+    trigger_map = {}
+    Array(version['trigger']).each do |trigger|
+      payload = sanitize_resource(trigger, folder_map)
+      payload['type'] = remap_type.call(payload['type'])
+      result = post("#{base}/triggers", payload)
+      sleep(RATE_LIMIT_PAUSE)
+      return result unless result.success
+
+      trigger_map[trigger['triggerId']] = result.data['triggerId']
+    end
+
+    tags_imported = 0
+    Array(version['tag']).each do |tag|
+      payload = sanitize_resource(tag, folder_map)
+      payload['type'] = remap_type.call(payload['type'])
+      payload['firingTriggerId'] = remap_ids(tag['firingTriggerId'], trigger_map) if tag['firingTriggerId']
+      payload['blockingTriggerId'] = remap_ids(tag['blockingTriggerId'], trigger_map) if tag['blockingTriggerId']
+      apply_field_override!(payload, field_overrides)
+      result = post("#{base}/tags", payload)
+      sleep(RATE_LIMIT_PAUSE)
+      return result unless result.success
+
+      tags_imported += 1
+    end
+
+    Result.new(success: true, data: {
+                 'templates' => template_map.size,
+                 'folders' => folder_map.size,
+                 'variables' => variable_map.size,
+                 'triggers' => trigger_map.size,
+                 'tags' => tags_imported
+               })
+  end
+
+  def apply_field_override!(payload, field_overrides)
+    return unless field_overrides
+
+    if payload['type'] == 'c' && field_overrides[:variable_values]&.key?(payload['name'])
+      value_param = Array(payload['parameter']).find { |p| p['key'] == 'value' }
+      value_param['value'] = field_overrides[:variable_values][payload['name']] if value_param
+    end
+
+    if field_overrides[:sheet_url] && payload['type'] == 'img' && payload['name'].to_s.downcase.include?('sheet')
+      url_param = Array(payload['parameter']).find { |p| p['key'] == 'url' }
+      if url_param
+        url_param['value'] = url_param['value'].sub(%r{https://script\.google\.com/macros/s/[^/]+/exec}, field_overrides[:sheet_url])
+      end
+    end
   end
 
   def token

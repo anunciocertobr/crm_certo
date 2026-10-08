@@ -63,6 +63,8 @@ Rails.application.routes.draw do
       get 'marketing/gtm/accounts', to: 'marketing/gtm#accounts'
       get 'marketing/gtm/accounts/:account_id/containers', to: 'marketing/gtm#containers'
       post 'marketing/gtm/accounts/:account_id/containers', to: 'marketing/gtm#create_container'
+      post 'marketing/gtm/accounts/:account_id/containers/from_template', to: 'marketing/gtm#create_from_template'
+      delete 'marketing/gtm/accounts/:account_id/containers/:container_id', to: 'marketing/gtm#destroy_container'
       get 'marketing/gtm/accounts/:account_id/containers/:container_id/workspace', to: 'marketing/gtm#workspace'
       post 'marketing/gtm/accounts/:account_id/containers/:container_id/import', to: 'marketing/gtm#import_container'
 
