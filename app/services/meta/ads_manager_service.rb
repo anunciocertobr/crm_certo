@@ -1697,6 +1697,15 @@ class Meta::AdsManagerService
     get("/#{saved_audience_id}", fields: 'id,name,description,targeting')
   end
 
+  def delete_saved_audience(saved_audience_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    result = delete("/#{saved_audience_id}")
+    return result unless result.success
+
+    Result.new(success: true, data: { id: saved_audience_id, deleted: true })
+  end
+
   private
 
   # Página da campanha. Antes era sempre `Channel::FacebookPage.first` — a
