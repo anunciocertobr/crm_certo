@@ -228,6 +228,17 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
       respond(service.saved_audience_detail(saved_audience_id: params.require(:id_publico_salvo)))
     when 'excluir_publico_salvo'
       respond(service.delete_saved_audience(saved_audience_id: params.require(:id_publico_salvo)))
+    # --- Biblioteca de criativos (imagens/vídeos já na conta) -------------
+    when 'listar_imagens_criativo'
+      respond(service.list_ad_images(ad_account_id: params.require(:id_conta_anuncio)))
+    when 'listar_videos_criativo'
+      respond(service.list_ad_videos(ad_account_id: params.require(:id_conta_anuncio)))
+    when 'subir_imagem_criativo'
+      respond(service.upload_ad_image_by_url(ad_account_id: params.require(:id_conta_anuncio), url: params.require(:url)))
+    when 'excluir_imagem_criativo'
+      respond(service.delete_ad_image(ad_account_id: params.require(:id_conta_anuncio), image_hash: params.require(:hash)))
+    when 'excluir_video_criativo'
+      respond(service.delete_ad_video(video_id: params.require(:id_video)))
     # --- Listas de direcionamento (locais, não são objeto da Graph API) ---
     when 'listar_listas_direcionamento'
       render json: TargetingList.alphabetical.as_json(only: %i[id name items])

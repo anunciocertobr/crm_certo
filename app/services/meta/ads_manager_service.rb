@@ -1706,6 +1706,53 @@ class Meta::AdsManagerService
     Result.new(success: true, data: { id: saved_audience_id, deleted: true })
   end
 
+  # --- Biblioteca de criativos (imagens/vídeos já na conta de anúncio) --
+  # Testado ao vivo: listar (GET) e excluir (DELETE) já funcionam com o
+  # nível de acesso atual do app. Só subir (POST, upload_ad_image_by_url)
+  # depende do Marketing API Access Tier estar em "Full access" (pedido em
+  # análise na Meta no momento em que isso foi escrito) — até aprovar, só
+  # essa ação devolve "(#3) Application does not have the capability...",
+  # já tratado em friendly_error/graph_error_message, então a UI mostra uma
+  # mensagem decente sem precisar de nenhum tratamento especial aqui.
+
+  def list_ad_images(ad_account_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    get("/act_#{id}/adimages", fields: 'id,name,url,hash,width,height,created_time,permalink_url', limit: 100)
+  end
+
+  def list_ad_videos(ad_account_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    get("/act_#{id}/advideos", fields: 'id,title,picture,source,created_time,length,status', limit: 100)
+  end
+
+  # A Graph API aceita URL direto (baixa e guarda do lado dela) — evita
+  # lidar com upload de bytes/base64 pra esse fluxo de "reaproveitar o que
+  # já existe"; quem quer subir um arquivo novo do computador já tem esse
+  # caminho coberto no fluxo de criação de anúncio (ver create_image_ad etc).
+  def upload_ad_image_by_url(ad_account_id:, url:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    post("/act_#{id}/adimages", { url: url })
+  end
+
+  def delete_ad_image(ad_account_id:, image_hash:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    delete("/act_#{id}/adimages", params: { hash: image_hash })
+  end
+
+  def delete_ad_video(video_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    delete("/#{video_id}")
+  end
+
   private
 
   # Página da campanha. Antes era sempre `Channel::FacebookPage.first` — a
@@ -2881,9 +2928,9 @@ class Meta::AdsManagerService
   end
 
   # Só usado por `delete_audience`. Mesmo contrato de `get`/`post`.
-  def delete(path, override_token = nil)
+  def delete(path, override_token = nil, params: {})
     uri = URI("#{BASE_URL}#{path}")
-    uri.query = URI.encode_www_form(access_token: override_token || @token)
+    uri.query = URI.encode_www_form(params.merge(access_token: override_token || @token))
 
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = true
