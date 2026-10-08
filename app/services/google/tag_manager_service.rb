@@ -78,15 +78,70 @@ class Google::TagManagerService
   end
 
   # --- Importação de contêiner ---------------------------------------
-  # Sobe uma versão exportada (JSON do GTM) como uma nova versão do
-  # contêiner de destino, substituindo o conteúdo do workspace padrão.
+  # A API do Tag Manager NÃO tem um endpoint que aceite de uma vez só o JSON
+  # inteiro gerado por "Export Container" na UI do GTM — confirmado ao vivo
+  # (POST .../workspaces/:id:import_container devolve 404, esse endpoint não
+  # existe). O jeito real de importar programaticamente é recriar cada
+  # recurso (pasta, variável, acionador, tag) um por um via create_resource,
+  # na ordem que resolve as dependências, remapeando os ids antigos (do
+  # contêiner de origem, que aparecem em `firingTriggerId`/`parentFolderId`)
+  # pros ids novos que a API devolve ao criar no contêiner de destino.
+  #
+  # Limitação conhecida: setupTag/teardownTag (uma tag disparando outra) não
+  # são remapeados, e variáveis internas do GTM (builtInVariable) não são
+  # reativadas — raro o suficiente pra não bloquear o caso comum.
+  IDENTITY_FIELDS = %w[accountId containerId workspaceId tagId triggerId variableId folderId fingerprint path tagManagerUrl].freeze
 
   def import_container(account_id, container_id, container_version_json)
     workspace_id = default_workspace_id(account_id, container_id)
     return Result.new(success: false, error: 'Workspace não encontrado.') unless workspace_id
 
-    path = "/accounts/#{account_id}/containers/#{container_id}/workspaces/#{workspace_id}:import_container"
-    post(path, { encodedContainerVersion: container_version_json }, query: 'fingerprint=&importMode=CREATE')
+    version = parse_container_version(container_version_json)
+    return version unless version.is_a?(Hash)
+
+    base = workspace_base(account_id, container_id, workspace_id)
+
+    folder_map = {}
+    Array(version['folder']).each do |folder|
+      result = post("#{base}/folders", sanitize_resource(folder, folder_map))
+      return result unless result.success
+
+      folder_map[folder['folderId']] = result.data['folderId']
+    end
+
+    variable_map = {}
+    Array(version['variable']).each do |variable|
+      result = post("#{base}/variables", sanitize_resource(variable, folder_map))
+      return result unless result.success
+
+      variable_map[variable['variableId']] = result.data['variableId']
+    end
+
+    trigger_map = {}
+    Array(version['trigger']).each do |trigger|
+      result = post("#{base}/triggers", sanitize_resource(trigger, folder_map))
+      return result unless result.success
+
+      trigger_map[trigger['triggerId']] = result.data['triggerId']
+    end
+
+    tags_imported = 0
+    Array(version['tag']).each do |tag|
+      payload = sanitize_resource(tag, folder_map)
+      payload['firingTriggerId'] = remap_ids(tag['firingTriggerId'], trigger_map) if tag['firingTriggerId']
+      payload['blockingTriggerId'] = remap_ids(tag['blockingTriggerId'], trigger_map) if tag['blockingTriggerId']
+      result = post("#{base}/tags", payload)
+      return result unless result.success
+
+      tags_imported += 1
+    end
+
+    Result.new(success: true, data: {
+                 'folders' => folder_map.size,
+                 'variables' => variable_map.size,
+                 'triggers' => trigger_map.size,
+                 'tags' => tags_imported
+               })
   end
 
   # --- Permissões / compartilhamento -----------------------------------
@@ -111,6 +166,24 @@ class Google::TagManagerService
     delete("/accounts/#{account_id}/user_permissions/#{permission_id}")
   end
 
+  # --- Versões e publicação ---------------------------------------------
+  # Cria uma versão a partir do workspace padrão (congela o estado atual
+  # dos tags/triggers/variáveis) e, opcionalmente, publica — só depois de
+  # publicar as mudanças passam a valer no site de verdade.
+
+  def create_version(account_id, container_id, name = nil)
+    workspace_id = default_workspace_id(account_id, container_id)
+    return Result.new(success: false, error: 'Workspace não encontrado.') unless workspace_id
+
+    payload = {}
+    payload[:name] = name if name.present?
+    post("#{workspace_base(account_id, container_id, workspace_id)}:create_version", payload)
+  end
+
+  def publish_version(account_id, container_id, container_version_id)
+    post("/accounts/#{account_id}/containers/#{container_id}/versions/#{container_version_id}:publish", {})
+  end
+
   private
 
   def default_workspace_id(account_id, container_id)
@@ -122,6 +195,29 @@ class Google::TagManagerService
 
   def workspace_base(account_id, container_id, workspace_id)
     "/accounts/#{account_id}/containers/#{container_id}/workspaces/#{workspace_id}"
+  end
+
+  # Aceita tanto o arquivo de export completo (com exportFormatVersion/
+  # exportTime/containerVersion) quanto só o objeto containerVersion direto.
+  def parse_container_version(container_version_json)
+    parsed = JSON.parse(container_version_json)
+    parsed['containerVersion'] || parsed
+  rescue JSON::ParserError
+    Result.new(success: false, error: 'JSON inválido — exporte o contêiner de novo pelo GTM e tente outra vez.')
+  end
+
+  # Remove os ids do contêiner de ORIGEM (a API gera novos ao criar no
+  # destino) e remapeia parentFolderId pro id da pasta já recriada aqui.
+  def sanitize_resource(resource, folder_map)
+    payload = resource.except(*IDENTITY_FIELDS)
+    if resource['parentFolderId'] && folder_map[resource['parentFolderId']]
+      payload['parentFolderId'] = folder_map[resource['parentFolderId']]
+    end
+    payload
+  end
+
+  def remap_ids(ids, map)
+    Array(ids).map { |id| map[id] || id }
   end
 
   def token
