@@ -41,6 +41,12 @@ module Api
           render json: { success: false, errors: [e.message] }, status: :bad_gateway
         end
 
+        def valid_categories
+          render json: { success: true, data: client.valid_categories }
+        rescue ::NinetyNine::Client::Error => e
+          render json: { success: false, errors: [e.message] }, status: :bad_gateway
+        end
+
         # --- Cardápio -------------------------------------------------------
 
         def menu
@@ -84,6 +90,19 @@ module Api
 
         def delivered_order
           render json: { success: true, data: client.delivered_order(params.require(:order_id)) }
+        rescue ::NinetyNine::Client::Error => e
+          render json: { success: false, errors: [e.message] }, status: :bad_gateway
+        end
+
+        def dispatch_self_delivery
+          data = client.dispatch_self_delivery(
+            params.require(:order_id),
+            courier_info: params.require(:courier_info).permit!.to_h,
+            limit_time: params.require(:limit_time),
+            vehicle: params[:vehicle],
+            delivery_fee: params[:delivery_fee]
+          )
+          render json: { success: true, data: data }
         rescue ::NinetyNine::Client::Error => e
           render json: { success: false, errors: [e.message] }, status: :bad_gateway
         end
