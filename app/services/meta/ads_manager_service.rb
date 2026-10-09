@@ -989,10 +989,68 @@ class Meta::AdsManagerService
       url = next_url
     end
 
+    enrich_leads_with_creative!(leads)
     Result.new(success: true, data: leads)
   rescue StandardError => e
     Rails.logger.error "Meta::AdsManagerService: GET /#{form_id}/leads error: #{e.message}"
     Result.new(success: false, error: 'Erro inesperado ao buscar os leads deste formulário.')
+  end
+
+  # Adiciona criativo_nome/criativo_imagem/criativo_video/criativo_link em
+  # cada lead, buscando uma vez por ad_id ÚNICO (não por lead) — evita N+1
+  # quando muitos leads vêm do mesmo anúncio, que é o caso normal.
+  def enrich_leads_with_creative!(leads)
+    unique_ad_ids = leads.filter_map { |l| l['ad_id'] }.uniq
+    return if unique_ad_ids.empty?
+
+    creatives_by_ad_id = unique_ad_ids.each_with_object({}) do |ad_id, memo|
+      memo[ad_id] = ad_creative_summary(ad_id)
+    end
+
+    leads.each do |lead|
+      creative = creatives_by_ad_id[lead['ad_id']]
+      next unless creative
+
+      lead['criativo_nome'] = creative[:nome]
+      lead['criativo_imagem'] = creative[:imagem]
+      lead['criativo_video'] = creative[:video]
+      lead['criativo_link'] = creative[:link]
+    end
+  end
+
+  # `effective_object_story_id` vem como "<page_id>_<post_id>" — formato
+  # exigido pra montar o permalink do post (funciona tanto pro Facebook
+  # quanto, pelo mesmo link, pro conteúdo espelhado no Instagram quando o
+  # anúncio roda nas duas posições).
+  def ad_creative_summary(ad_id)
+    ad = get("/#{ad_id}", fields: 'effective_object_story_id,creative{name,title,image_url,thumbnail_url,video_id,object_story_spec}')
+    return {} unless ad.success
+
+    creative = ad.data['creative'] || {}
+    link_data = creative.dig('object_story_spec', 'link_data') || {}
+    video_data = creative.dig('object_story_spec', 'video_data') || {}
+
+    video_url = nil
+    if creative['video_id'].present?
+      video_result = get("/#{creative['video_id']}", fields: 'source')
+      video_url = video_result.data['source'] if video_result.success
+    end
+
+    story_id = ad.data['effective_object_story_id']
+    permalink = if story_id.present? && story_id.include?('_')
+                  page_id, post_id = story_id.split('_', 2)
+                  "https://www.facebook.com/#{page_id}/posts/#{post_id}"
+                end
+
+    {
+      nome: creative['name'] || creative['title'],
+      imagem: creative['image_url'] || link_data['picture'] || creative['thumbnail_url'] || video_data['image_url'],
+      video: video_url,
+      link: permalink
+    }
+  rescue StandardError => e
+    Rails.logger.error "Meta::AdsManagerService#ad_creative_summary(#{ad_id}): #{e.message}"
+    {}
   end
 
   def update_leadgen_form_status(page_id:, form_id:, status:)
