@@ -1,7 +1,7 @@
 module Api
   module V1
     class IfoodController < Api::V1::BaseController
-      before_action :fetch_order, only: %i[confirm start_preparation ready_to_pickup dispatch_order cancel cancellation_reasons request_driver cancel_request_driver delivery_quote_for_order]
+      before_action :fetch_order, only: %i[confirm start_preparation ready_to_pickup dispatch_order cancel cancellation_reasons request_driver cancel_request_driver assign_driver delivery_quote_for_order]
 
       # Status da conexão: credenciais configuradas + dados da loja vinculada
       # no iFood (nome, aberta/fechada).
@@ -113,6 +113,20 @@ module Api
         render json: { success: false, errors: [e.message] }, status: :bad_gateway
       end
 
+      # Logistics — entrega com entregador PRÓPRIO da loja (diferente de
+      # #request_driver, que usa entregador parceiro do iFood).
+      def assign_driver
+        data = Ifood::Client.new.assign_driver(
+          @order.ifood_order_id,
+          worker_name: params.require(:worker_name),
+          worker_phone: params.require(:worker_phone),
+          worker_vehicle_type: params[:worker_vehicle_type].presence || 'MOTORCYCLE'
+        )
+        render json: { success: true, data: data }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
       # Handshake Platform — responder disputa pós-entrega aberta pelo cliente.
       def accept_dispute
         data = Ifood::Client.new.accept_dispute(
@@ -130,6 +144,22 @@ module Api
           params.require(:dispute_id),
           reason: params.require(:reason),
           detail_reason: params[:detail_reason]
+        )
+        render json: { success: true, data: data }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      # Handshake Platform — propor alternativa (ex.: reembolso parcial) pra
+      # uma disputa, em vez de aceitar/recusar direto. alternative_id vem do
+      # payload do evento HANDSHAKE_DISPUTE recebido via polling.
+      def propose_dispute_alternative
+        data = Ifood::Client.new.propose_dispute_alternative(
+          params.require(:dispute_id),
+          params.require(:alternative_id),
+          type: params.require(:type),
+          amount_value: params.require(:amount_value),
+          currency: params[:currency].presence || 'BRL'
         )
         render json: { success: true, data: data }
       rescue Ifood::Client::Error => e
