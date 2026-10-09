@@ -53,6 +53,12 @@ module Meta
 
       def process(submission)
         lead_form = MetaLeadForm.find_by(form_id: submission.form_id, active: true)
+
+        # Notificar por WhatsApp é independente do mapeamento no CRM — dispara
+        # mesmo pra formulário ainda sem pipeline configurado (ver
+        # Meta::LeadAds::WhatsappNotifierService sobre a resolução do destino).
+        Meta::LeadAds::WhatsappNotifierService.call(submission)
+
         unless lead_form
           submission.update!(status: 'unmapped_form') unless submission.status == 'unmapped_form'
           return

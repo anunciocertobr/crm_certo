@@ -20,6 +20,13 @@ module Api
             MARKETING_ALERTS_CHANNELS MARKETING_ALERTS_INBOX_ID
             MARKETING_ALERTS_WHATSAPP_NUMBER MARKETING_ALERTS_EMAIL
           ],
+          # Padrão da conta pra Meta::LeadAds::WhatsappNotifierService — usado
+          # quando um formulário não tem override em MetaLeadNotificationSetting
+          # (ver Criação Meta > Formulários > Notificações).
+          'meta_leads_notify' => %w[
+            META_LEADS_NOTIFY_ENABLED META_LEADS_NOTIFY_INBOX_ID
+            META_LEADS_NOTIFY_WHATSAPP_NUMBER
+          ],
           # Contatos > Contatos Google — liga/desliga Contact#auto_save_to_google_contacts
           # (ver Google::AutoSaveContactJob). A conexão OAuth em si é por
           # Integrations::Hook(app_id: 'google_workspace'), não por aqui —
