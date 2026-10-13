@@ -294,29 +294,63 @@ class Ifood::Client
         })
   end
 
-  # Atualização EM MASSA de preço/status — endpoint diferente do item único
-  # (ver nota em #update_item sobre o PATCH individual não aplicar de fato).
-  # items_prices/items_status: [{item_id:, value:}] / [{item_id:, status:}].
-  # Exigido assim pelo checklist de homologação do Catalog (PATCH /items/price
-  # e /items/status, em vez de deletar+recriar um item por vez).
-  #
-  # TESTADO EM 13/10/2026 contra a API real com um item_id válido (UUID
-  # confirmado via #category_items) e deu 400 "itemId must be a UUID" mesmo
-  # assim — tanto com o body {items: [...]} quanto como array puro na raiz.
-  # Mesma suspeita de endpoint não-operante nesta conta de teste que já
-  # afeta o PATCH individual (ver #update_item). Reportar ao suporte do
-  # iFood se o checklist de homologação do Catalog exigir especificamente
-  # esse endpoint em massa.
+  # Atualização de preço/status — endpoint diferente do PATCH individual
+  # antigo que não aplicava de fato (ver nota em #update_item). TESTADO E
+  # CONFIRMADO FUNCIONANDO em 13/10/2026 contra a API real (mudança de preço
+  # verificada de volta via #category_items). A pegadinha: apesar do nome
+  # "atualização em massa" no checklist do iFood, o body esperado é um
+  # OBJETO ÚNICO na raiz ({itemId:, price:}), não um array nem {items: [...]}
+  # — isso retorna 400 "itemId must be a UUID" mesmo com UUID válido (erro
+  # enganoso; o schema que a API realmente aceita é outro). Por isso estes
+  # métodos aceitam uma lista e fazem uma chamada por item internamente.
   def bulk_update_item_prices(items_prices, merchant_id: self.class.merchant_id)
-    patch("/catalog/v2.0/merchants/#{merchant_id}/items/price", {
-            items: items_prices.map { |i| { itemId: i[:item_id], price: { value: i[:value] } } }
-          })
+    items_prices.map do |i|
+      patch("/catalog/v2.0/merchants/#{merchant_id}/items/price", { itemId: i[:item_id], price: { value: i[:value] } })
+    end
   end
 
   def bulk_update_item_status(items_status, merchant_id: self.class.merchant_id)
-    patch("/catalog/v2.0/merchants/#{merchant_id}/items/status", {
-            items: items_status.map { |i| { itemId: i[:item_id], status: i[:status] } }
-          })
+    items_status.map do |i|
+      patch("/catalog/v2.0/merchants/#{merchant_id}/items/status", { itemId: i[:item_id], status: i[:status] })
+    end
+  end
+
+  # Grupos de complemento (ex.: "Adicionais", "Escolha o molho") e seus
+  # complementos (options). Schema descoberto por tentativa em 13/10/2026:
+  # criar grupo é POST (não PUT, que dá 404); cada complemento exige um
+  # productId próprio (mesma lógica de #create_item — criar com
+  # #create_product antes); PATCH de preço/status do complemento tem a MESMA
+  # pegadinha de objeto único citada acima.
+  def option_groups(merchant_id: self.class.merchant_id)
+    get("/catalog/v2.0/merchants/#{merchant_id}/optionGroups")
+  end
+
+  def create_option_group(name:, min: 0, max: 1, status: 'AVAILABLE', index: 0, merchant_id: self.class.merchant_id)
+    post("/catalog/v2.0/merchants/#{merchant_id}/optionGroups", {
+           name: name, min: min, max: max, status: status, index: index
+         })
+  end
+
+  def delete_option_group(option_group_id, merchant_id: self.class.merchant_id)
+    delete("/catalog/v2.0/merchants/#{merchant_id}/optionGroups/#{option_group_id}")
+  end
+
+  def create_option(option_group_id:, product_id:, price_value:, status: 'AVAILABLE', index: 0, merchant_id: self.class.merchant_id)
+    post("/catalog/v2.0/merchants/#{merchant_id}/optionGroups/#{option_group_id}/options", {
+           productId: product_id, status: status, price: { value: price_value }, index: index
+         })
+  end
+
+  def delete_option(option_group_id, option_id, merchant_id: self.class.merchant_id)
+    delete("/catalog/v2.0/merchants/#{merchant_id}/optionGroups/#{option_group_id}/options/#{option_id}")
+  end
+
+  def update_option_price(option_id, price_value, merchant_id: self.class.merchant_id)
+    patch("/catalog/v2.0/merchants/#{merchant_id}/options/price", { optionId: option_id, price: { value: price_value } })
+  end
+
+  def update_option_status(option_id, status, merchant_id: self.class.merchant_id)
+    patch("/catalog/v2.0/merchants/#{merchant_id}/options/status", { optionId: option_id, status: status })
   end
 
   # Analytics — KPIs de pedidos (GMV, contagem por forma de pagamento) num
