@@ -294,6 +294,31 @@ class Ifood::Client
         })
   end
 
+  # Atualização EM MASSA de preço/status — endpoint diferente do item único
+  # (ver nota em #update_item sobre o PATCH individual não aplicar de fato).
+  # items_prices/items_status: [{item_id:, value:}] / [{item_id:, status:}].
+  # Exigido assim pelo checklist de homologação do Catalog (PATCH /items/price
+  # e /items/status, em vez de deletar+recriar um item por vez).
+  #
+  # TESTADO EM 13/10/2026 contra a API real com um item_id válido (UUID
+  # confirmado via #category_items) e deu 400 "itemId must be a UUID" mesmo
+  # assim — tanto com o body {items: [...]} quanto como array puro na raiz.
+  # Mesma suspeita de endpoint não-operante nesta conta de teste que já
+  # afeta o PATCH individual (ver #update_item). Reportar ao suporte do
+  # iFood se o checklist de homologação do Catalog exigir especificamente
+  # esse endpoint em massa.
+  def bulk_update_item_prices(items_prices, merchant_id: self.class.merchant_id)
+    patch("/catalog/v2.0/merchants/#{merchant_id}/items/price", {
+            items: items_prices.map { |i| { itemId: i[:item_id], price: { value: i[:value] } } }
+          })
+  end
+
+  def bulk_update_item_status(items_status, merchant_id: self.class.merchant_id)
+    patch("/catalog/v2.0/merchants/#{merchant_id}/items/status", {
+            items: items_status.map { |i| { itemId: i[:item_id], status: i[:status] } }
+          })
+  end
+
   # Analytics — KPIs de pedidos (GMV, contagem por forma de pagamento) num
   # período. referenceDate é filtrado por data de criação do pedido.
   def order_kpis(begin_date:, end_date:, merchant_id: self.class.merchant_id)
@@ -375,6 +400,35 @@ class Ifood::Client
            workerPhone: worker_phone,
            workerVehicleType: worker_vehicle_type
          })
+  end
+
+  # Logistics — demais passos do fluxo de entrega com entregador próprio,
+  # depois de #assign_driver. Exigidos pelo checklist de homologação do
+  # módulo Logistics (Cenário 3): entregador a caminho da loja, chegou na
+  # loja, coletou e saiu pra entrega (despacho via Logistics — diferente de
+  # #dispatch_order, que é o despacho do módulo Order), chegou no destino.
+  def going_to_origin(ifood_order_id)
+    post("/logistics/v1.0/orders/#{ifood_order_id}/goingToOrigin", nil)
+  end
+
+  def arrived_at_origin(ifood_order_id)
+    post("/logistics/v1.0/orders/#{ifood_order_id}/arrivedAtOrigin", nil)
+  end
+
+  def logistics_dispatch(ifood_order_id)
+    post("/logistics/v1.0/orders/#{ifood_order_id}/dispatch", nil)
+  end
+
+  def arrived_at_destination(ifood_order_id)
+    post("/logistics/v1.0/orders/#{ifood_order_id}/arrivedAtDestination", nil)
+  end
+
+  # Etapa obrigatória do módulo Logistics: confirma a entrega através do
+  # código de 4 dígitos que o cliente informa ao entregador (evento
+  # DELIVERY_DROP_CODE_REQUESTED, recebido via #poll_events, avisa quando um
+  # pedido exige essa validação).
+  def verify_delivery_code(ifood_order_id, code:)
+    post("/logistics/v1.0/orders/#{ifood_order_id}/verifyDeliveryCode", { code: code })
   end
 
   # Handshake Platform — propor uma alternativa (ex.: reembolso parcial) pra
