@@ -955,6 +955,15 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.index ["status"], name: "index_ifood_orders_on_status"
   end
 
+  create_table "ifood_product_cache", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "ifood_product_id", null: false
+    t.string "name"
+    t.string "image"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["ifood_product_id"], name: "index_ifood_product_cache_on_ifood_product_id", unique: true
+  end
+
   create_table "inactivity_action_executions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "conversation_id", null: false
     t.uuid "agent_bot_id", null: false

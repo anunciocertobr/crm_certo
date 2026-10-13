@@ -374,7 +374,10 @@ module Api
               category_name: cat['name'],
               name: product['name'],
               description: product['description'],
-              image: product['image'],
+              # A API do iFood é inconsistente: ao criar/editar produto o campo
+              # vem como "image"; ao LISTAR (aqui, via category_items) vem como
+              # "imagePath". Confirmado em 13/10/2026 testando ao vivo.
+              image: product['image'] || product['imagePath'],
               price: item.dig('price', 'value'),
               status: item['status']
             }
@@ -430,11 +433,12 @@ module Api
       def option_groups
         client = Ifood::Client.new
         groups = client.option_groups
-        products_by_id = client.products.index_by { |p| p['id'] }
+        product_ids = groups.flat_map { |g| (g['options'] || []).map { |o| o['productId'] } }.compact
+        cache_by_id = IfoodProductCache.where(ifood_product_id: product_ids).index_by(&:ifood_product_id)
         enriched = groups.map do |group|
           options = (group['options'] || []).map do |opt|
-            product = products_by_id[opt['productId']] || {}
-            opt.merge('productName' => product['name'], 'image' => product['image'])
+            cached = cache_by_id[opt['productId']]
+            opt.merge('productName' => cached&.name, 'image' => cached&.image)
           end
           group.merge('options' => options)
         end
@@ -464,6 +468,10 @@ module Api
           option_group_id: params.require(:option_group_id),
           product_id: product['id'],
           price_value: params.require(:price_value)
+        )
+        IfoodProductCache.upsert(
+          { ifood_product_id: product['id'], name: product['name'], image: product['image'] },
+          unique_by: :ifood_product_id
         )
         render json: { success: true, data: data.merge('productName' => product['name'], 'image' => product['image']) }, status: :created
       rescue Ifood::Client::Error => e
