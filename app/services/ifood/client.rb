@@ -227,22 +227,31 @@ class Ifood::Client
 
   # Cria o produto (nome/descrição) — só o cadastro em si, sem preço nem
   # categoria ainda. `serving` é obrigatório pelo iFood (ex.: "NOT_APPLICABLE").
-  def create_product(name:, description: nil, serving: 'NOT_APPLICABLE', merchant_id: self.class.merchant_id)
+  # `image_data_uri`, se informado, precisa ser um Data URI completo
+  # ("data:image/jpeg;base64,...") — mandar só o base64 puro (sem o prefixo
+  # data:...) dá 400 "Image must be base64 encoded", mensagem enganosa (o
+  # valor JÁ é base64 válido; o que falta é o prefixo). Confirmado contra a
+  # API real em 13/10/2026 — a resposta já volta com a URL pública
+  # (static-images.ifood.com.br) no campo "image".
+  def create_product(name:, description: nil, serving: 'NOT_APPLICABLE', image_data_uri: nil, merchant_id: self.class.merchant_id)
     post("/catalog/v2.0/merchants/#{merchant_id}/products", {
            name: name,
            description: description,
            serving: serving,
+           image: image_data_uri,
            shifts: []
          }.compact)
   end
 
-  # Edita nome/descrição do produto (não mexe em preço/categoria — isso é o
-  # "item", ver #update_item). Confirmado contra a API real.
-  def update_product(product_id, name:, description: nil, serving: 'NOT_APPLICABLE', merchant_id: self.class.merchant_id)
+  # Edita nome/descrição/foto do produto (não mexe em preço/categoria —
+  # isso é o "item", ver #update_item). Confirmado contra a API real,
+  # inclusive troca de foto (mesmo formato de Data URI do #create_product).
+  def update_product(product_id, name:, description: nil, serving: 'NOT_APPLICABLE', image_data_uri: nil, merchant_id: self.class.merchant_id)
     put("/catalog/v2.0/merchants/#{merchant_id}/products/#{product_id}", {
           name: name,
           description: description,
           serving: serving,
+          image: image_data_uri,
           shifts: []
         }.compact)
   end

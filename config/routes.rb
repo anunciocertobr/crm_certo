@@ -144,6 +144,18 @@ Rails.application.routes.draw do
         get '/analytics', to: 'ifood#analytics'
         get '/opening_hours', to: 'ifood#opening_hours'
         put '/opening_hours', to: 'ifood#update_opening_hours'
+        get '/option_groups', to: 'ifood#option_groups'
+        post '/option_groups', to: 'ifood#create_option_group'
+        delete '/option_groups/:id', to: 'ifood#destroy_option_group'
+        post '/option_groups/:option_group_id/options', to: 'ifood#create_option'
+        delete '/option_groups/:option_group_id/options/:id', to: 'ifood#destroy_option'
+        patch '/options/:id/price', to: 'ifood#update_option_price'
+        patch '/options/:id/status', to: 'ifood#update_option_status'
+        post '/orders/:id/going_to_origin', to: 'ifood#going_to_origin'
+        post '/orders/:id/arrived_at_origin', to: 'ifood#arrived_at_origin'
+        post '/orders/:id/logistics_dispatch', to: 'ifood#logistics_dispatch'
+        post '/orders/:id/arrived_at_destination', to: 'ifood#arrived_at_destination'
+        post '/orders/:id/verify_delivery_code', to: 'ifood#verify_delivery_code'
       end
       namespace :admin do
         get 'app_configs/:config_type', to: 'app_configs#show', as: :app_config

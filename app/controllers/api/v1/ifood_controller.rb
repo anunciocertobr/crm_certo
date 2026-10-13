@@ -1,7 +1,7 @@
 module Api
   module V1
     class IfoodController < Api::V1::BaseController
-      before_action :fetch_order, only: %i[confirm start_preparation ready_to_pickup dispatch_order cancel cancellation_reasons request_driver cancel_request_driver assign_driver delivery_quote_for_order]
+      before_action :fetch_order, only: %i[confirm start_preparation ready_to_pickup dispatch_order cancel cancellation_reasons request_driver cancel_request_driver assign_driver delivery_quote_for_order going_to_origin arrived_at_origin logistics_dispatch arrived_at_destination verify_delivery_code]
 
       # Status da conexão: credenciais configuradas + dados da loja vinculada
       # no iFood (nome, aberta/fechada).
@@ -123,6 +123,41 @@ module Api
           worker_vehicle_type: params[:worker_vehicle_type].presence || 'MOTORCYCLE'
         )
         render json: { success: true, data: data }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      def going_to_origin
+        Ifood::Client.new.going_to_origin(@order.ifood_order_id)
+        render json: { success: true }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      def arrived_at_origin
+        Ifood::Client.new.arrived_at_origin(@order.ifood_order_id)
+        render json: { success: true }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      def logistics_dispatch
+        Ifood::Client.new.logistics_dispatch(@order.ifood_order_id)
+        render json: { success: true }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      def arrived_at_destination
+        Ifood::Client.new.arrived_at_destination(@order.ifood_order_id)
+        render json: { success: true }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      def verify_delivery_code
+        Ifood::Client.new.verify_delivery_code(@order.ifood_order_id, code: params.require(:code))
+        render json: { success: true }
       rescue Ifood::Client::Error => e
         render json: { success: false, errors: [e.message] }, status: :bad_gateway
       end
@@ -297,7 +332,8 @@ module Api
       def create_product
         data = Ifood::Client.new.create_product(
           name: params.require(:name),
-          description: params[:description]
+          description: params[:description],
+          image_data_uri: params[:image]
         )
         render json: { success: true, data: data }, status: :created
       rescue Ifood::Client::Error => e
@@ -338,6 +374,7 @@ module Api
               category_name: cat['name'],
               name: product['name'],
               description: product['description'],
+              image: product['image'],
               price: item.dig('price', 'value'),
               status: item['status']
             }
@@ -353,8 +390,13 @@ module Api
       # Ifood::Client#update_item sobre por que o PATCH direto não funciona).
       def update_menu_item
         client = Ifood::Client.new
-        if params[:name].present?
-          client.update_product(params.require(:product_id), name: params[:name], description: params[:description])
+        if params[:name].present? || params[:image].present?
+          client.update_product(
+            params.require(:product_id),
+            name: params.require(:name),
+            description: params[:description],
+            image_data_uri: params[:image]
+          )
         end
         if params[:price_value].present? || params[:status].present?
           client.update_item(
@@ -377,6 +419,73 @@ module Api
         product_id = params.require(:product_id)
         client.delete_item(category_id, product_id)
         client.delete_product(product_id)
+        render json: { success: true }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      # Grupos de complemento (ex.: "Adicionais") e seus complementos —
+      # cada complemento é um produto próprio (nome/foto) vinculado via
+      # option_group_id + price (ver Ifood::Client#create_option).
+      def option_groups
+        client = Ifood::Client.new
+        groups = client.option_groups
+        products_by_id = client.products.index_by { |p| p['id'] }
+        enriched = groups.map do |group|
+          options = (group['options'] || []).map do |opt|
+            product = products_by_id[opt['productId']] || {}
+            opt.merge('productName' => product['name'], 'image' => product['image'])
+          end
+          group.merge('options' => options)
+        end
+        render json: { success: true, data: enriched }
+      rescue Ifood::Client::Error
+        render json: { success: true, data: [] }
+      end
+
+      def create_option_group
+        data = Ifood::Client.new.create_option_group(name: params.require(:name))
+        render json: { success: true, data: data }, status: :created
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      def destroy_option_group
+        Ifood::Client.new.delete_option_group(params.require(:id))
+        render json: { success: true }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      def create_option
+        client = Ifood::Client.new
+        product = client.create_product(name: params.require(:name), image_data_uri: params[:image])
+        data = client.create_option(
+          option_group_id: params.require(:option_group_id),
+          product_id: product['id'],
+          price_value: params.require(:price_value)
+        )
+        render json: { success: true, data: data.merge('productName' => product['name'], 'image' => product['image']) }, status: :created
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      def destroy_option
+        Ifood::Client.new.delete_option(params.require(:option_group_id), params.require(:id))
+        render json: { success: true }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      def update_option_price
+        Ifood::Client.new.update_option_price(params.require(:id), params.require(:price_value))
+        render json: { success: true }
+      rescue Ifood::Client::Error => e
+        render json: { success: false, errors: [e.message] }, status: :bad_gateway
+      end
+
+      def update_option_status
+        Ifood::Client.new.update_option_status(params.require(:id), params.require(:status))
         render json: { success: true }
       rescue Ifood::Client::Error => e
         render json: { success: false, errors: [e.message] }, status: :bad_gateway
