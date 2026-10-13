@@ -91,6 +91,18 @@ class Google::DriveService
     handle(http.request(request), 'subir o arquivo pro')
   end
 
+  # Torna o arquivo acessível por link pra quem NÃO está logado na conta
+  # Google conectada (ex.: suporte do iFood abrindo o link de um vídeo de
+  # homologação) — sem isso, webViewLink só abre pra quem já tem acesso ao
+  # Drive da conta. `role: 'reader', type: 'anyone'` é o equivalente da
+  # opção "Qualquer pessoa com o link" no Drive.
+  def share_file(file_id:)
+    token = access_token
+    return Result.new(success: false, error: not_connected_message) unless token
+
+    post("/files/#{file_id}/permissions", token, { role: 'reader', type: 'anyone' })
+  end
+
   MAX_DOWNLOAD_BYTES = 40 * 1024 * 1024
 
   # Baixa o conteúdo de um arquivo (imagem/vídeo) pra usar como criativo de

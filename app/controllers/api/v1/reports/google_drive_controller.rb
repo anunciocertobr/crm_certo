@@ -28,6 +28,8 @@ class Api::V1::Reports::GoogleDriveController < Api::V1::BaseController
                 content_type: file.content_type.presence || 'application/octet-stream',
                 parent_id: params[:parent_id].presence
               ))
+    when 'compartilhar_arquivo'
+      respond(service.share_file(file_id: params.require(:file_id)))
     else
       error_response(ApiErrorCodes::MISSING_REQUIRED_FIELD, "Ação desconhecida: #{params[:acao]}", status: :unprocessable_entity)
     end
