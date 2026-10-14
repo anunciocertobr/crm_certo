@@ -1022,8 +1022,16 @@ class Meta::AdsManagerService
   # exigido pra montar o permalink do post (funciona tanto pro Facebook
   # quanto, pelo mesmo link, pro conteúdo espelhado no Instagram quando o
   # anúncio roda nas duas posições).
+  # IMPORTANTE: creative e effective_object_story_id são buscados em duas
+  # chamadas SEPARADAS, de propósito. A Graph API recusa a requisição
+  # inteira (400 "Tried accessing nonexisting field") quando QUALQUER campo
+  # pedido é inválido pro tipo de anúncio — effective_object_story_id não
+  # existe pra todo anúncio (ex.: alguns anúncios de vídeo-lead), e juntar os
+  # dois campos numa chamada só derrubava `creative` (nome/imagem) junto,
+  # mesmo esse sendo válido sozinho. O permalink (link do post) é cosmético;
+  # nome/imagem do criativo não podem ficar reféns dele.
   def ad_creative_summary(ad_id)
-    ad = get("/#{ad_id}", fields: 'effective_object_story_id,creative{name,title,image_url,thumbnail_url,video_id,object_story_spec}')
+    ad = get("/#{ad_id}", fields: 'creative{name,title,image_url,thumbnail_url,video_id,object_story_spec}')
     return {} unless ad.success
 
     creative = ad.data['creative'] || {}
@@ -1036,21 +1044,31 @@ class Meta::AdsManagerService
       video_url = video_result.data['source'] if video_result.success
     end
 
-    story_id = ad.data['effective_object_story_id']
-    permalink = if story_id.present? && story_id.include?('_')
-                  page_id, post_id = story_id.split('_', 2)
-                  "https://www.facebook.com/#{page_id}/posts/#{post_id}"
-                end
-
     {
       nome: creative['name'] || creative['title'],
       imagem: creative['image_url'] || link_data['picture'] || creative['thumbnail_url'] || video_data['image_url'],
       video: video_url,
-      link: permalink
+      link: ad_permalink(ad_id)
     }
   rescue StandardError => e
     Rails.logger.error "Meta::AdsManagerService#ad_creative_summary(#{ad_id}): #{e.message}"
     {}
+  end
+
+  # Best-effort: nem todo anúncio tem effective_object_story_id (ver
+  # comentário acima), então uma falha aqui não derruba nome/imagem — só
+  # fica sem link de post, que é o único dado que depende dele.
+  def ad_permalink(ad_id)
+    result = get("/#{ad_id}", fields: 'effective_object_story_id')
+    return nil unless result.success
+
+    story_id = result.data['effective_object_story_id']
+    return nil unless story_id.present? && story_id.include?('_')
+
+    page_id, post_id = story_id.split('_', 2)
+    "https://www.facebook.com/#{page_id}/posts/#{post_id}"
+  rescue StandardError
+    nil
   end
 
   def update_leadgen_form_status(page_id:, form_id:, status:)
