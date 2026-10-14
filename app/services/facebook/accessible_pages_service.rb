@@ -6,10 +6,12 @@
 class Facebook::AccessiblePagesService
   class Error < StandardError; end
 
-  FIELDS = 'id,name,access_token,instagram_business_account{id,username,profile_picture_url}'.freeze
+  FIELDS = 'id,name,access_token,business{id,name},instagram_business_account{id,username,profile_picture_url}'.freeze
 
-  # Retorna cada página com page_id/name/instagram (se vinculado) e se já
-  # existe como Channel::FacebookPage aqui.
+  # Retorna cada página com page_id/name/instagram (se vinculado), a BM dona
+  # da página (se tiver — página pessoal sem BM vem sem isso) e se já existe
+  # como Channel::FacebookPage aqui. business vem de graça no mesmo
+  # /me/accounts, não precisa de chamada extra por BM.
   def accessible_pages
     pages = fetch_pages
 
@@ -17,6 +19,8 @@ class Facebook::AccessiblePagesService
       {
         page_id: page['id'],
         name: page['name'],
+        business_id: page.dig('business', 'id'),
+        business_name: page.dig('business', 'name'),
         instagram: page['instagram_business_account'] && {
           id: page['instagram_business_account']['id'],
           username: page['instagram_business_account']['username'],
