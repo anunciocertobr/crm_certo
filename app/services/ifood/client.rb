@@ -37,9 +37,14 @@ class Ifood::Client
 
   # GET /events:polling — janela curta de eventos pendentes (pedidos novos,
   # mudanças de status). Cada evento precisa ser confirmado via #acknowledge
-  # ou o iFood reenvia depois.
-  def poll_events
-    get('/order/v1.0/events:polling') || []
+  # ou o iFood reenvia depois. excludeHeartbeat=true evita que o evento de
+  # heartbeat (que só serve pra manter a loja marcada como "aberta" pro
+  # iFood) conte como pedido e dispare acknowledge desnecessário; o header
+  # x-polling-merchants filtra o polling pro(s) merchant(s) desta conta,
+  # exigido pelo checklist de homologação do módulo Logistics.
+  def poll_events(merchant_id: self.class.merchant_id)
+    get('/order/v1.0/events:polling?excludeHeartbeat=true',
+        headers: { 'x-polling-merchants' => merchant_id }) || []
   end
 
   def acknowledge(event_ids)
@@ -503,8 +508,8 @@ class Ifood::Client
     JSON.parse(response.body)['accessToken']
   end
 
-  def get(path)
-    response = HTTParty.get("#{BASE_URL}#{path}", headers: auth_headers)
+  def get(path, headers: {})
+    response = HTTParty.get("#{BASE_URL}#{path}", headers: auth_headers.merge(headers))
     handle(response)
   end
 
