@@ -996,6 +996,43 @@ class Meta::AdsManagerService
     Result.new(success: false, error: 'Erro inesperado ao buscar os leads deste formulário.')
   end
 
+  # Busca "de qual formulário veio" um lead por telefone/nome/email, sem o
+  # usuário precisar saber de antemão qual formulário abrir. Não existe
+  # tabela local completa pra buscar (meta_lead_submissions só tem leads
+  # pós-webhook, incompleta/vazia pra quem nunca recebeu um) — vai direto na
+  # Graph API, formulário por formulário da Página (pula os com
+  # leads_count=0, sem custo de chamada). Mais lento que uma busca em banco,
+  # mas sempre com dado real.
+  def search_leads_in_page(page_id:, query:)
+    forms_result = leadgen_forms(page_id: page_id)
+    return forms_result unless forms_result.success
+
+    term = query.to_s.strip.downcase
+    return Result.new(success: true, data: []) if term.blank?
+
+    matches = []
+    Array(forms_result.data).each do |form|
+      next if form['leads_count'].to_i.zero?
+
+      leads_result = leadgen_form_leads(page_id: page_id, form_id: form['id'])
+      next unless leads_result.success
+
+      Array(leads_result.data).each do |lead|
+        next unless lead_matches?(lead, term)
+
+        matches << lead.merge('form_id' => form['id'], 'form_name' => form['name'])
+      end
+    end
+
+    Result.new(success: true, data: matches)
+  end
+
+  def lead_matches?(lead, term)
+    campos_texto = Array(lead['field_data']).flat_map { |f| f['values'] }
+    campos_texto += [lead['ad_name'], lead['adset_name'], lead['campaign_name']]
+    campos_texto.compact.any? { |v| v.to_s.downcase.include?(term) }
+  end
+
   # Adiciona criativo_nome/criativo_imagem/criativo_video/criativo_link em
   # cada lead, buscando uma vez por ad_id ÚNICO (não por lead) — evita N+1
   # quando muitos leads vêm do mesmo anúncio, que é o caso normal.

@@ -81,6 +81,8 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
       respond(service.leadgen_form_detail(page_id: params.require(:id_pagina), form_id: params.require(:id_formulario)))
     when 'leads_formulario_lead'
       respond(service.leadgen_form_leads(page_id: params.require(:id_pagina), form_id: params.require(:id_formulario)))
+    when 'buscar_leads_pagina'
+      respond(service.search_leads_in_page(page_id: params.require(:id_pagina), query: params.require(:busca)))
     when 'atualizar_status_formulario_lead'
       respond(service.update_leadgen_form_status(
         page_id: params.require(:id_pagina),
