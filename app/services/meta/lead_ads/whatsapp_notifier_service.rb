@@ -7,7 +7,8 @@
 # então o envio passa pelos providers já existentes (Evolution/Z-API/Cloud/
 # etc) sem reinventar a integração com WhatsApp.
 #
-# Resolução do destino (canal que envia + número que recebe), nessa ordem:
+# Resolução dos destinos (pode ser mais de um canal/número — botão "+" no
+# front), nessa ordem:
 #   1. MetaLeadNotificationSetting do form_id, se existir e enabled=true.
 #   2. Padrão da conta (GlobalConfigService, config 'meta_leads_notify').
 #   3. Nenhum dos dois configurado/habilitado -> não notifica (not_configured).
@@ -26,20 +27,46 @@ module Meta
         @submission = submission
       end
 
+      # Envia pra cada canal configurado; cada um falha isoladamente (um
+      # número errado não deve impedir os outros de receber). success=true
+      # se pelo menos um canal recebeu; errors traz o motivo de cada falha.
       def call
         return Result.new(success: true) if @submission.notified_whatsapp_at.present? # já notificado (reprocess)
 
-        inbox_id, target_phone = resolve_destination
-        return Result.new(success: false, error: 'not_configured') if inbox_id.blank? || target_phone.blank?
+        destinations = resolve_destinations
+        return Result.new(success: false, error: 'not_configured') if destinations.empty?
 
+        errors = []
+        sent = false
+        destinations.each do |inbox_id, target_phone|
+          send_to(inbox_id, target_phone)
+          sent = true
+        rescue StandardError => e
+          errors << "#{target_phone}: #{e.message}"
+        end
+
+        if sent
+          @submission.update!(notified_whatsapp_at: Time.current)
+          Result.new(success: true, error: errors.presence&.join('; '))
+        else
+          Result.new(success: false, error: errors.join('; '))
+        end
+      rescue StandardError => e
+        Rails.logger.error("Meta::LeadAds::WhatsappNotifierService failed: #{e.class}: #{e.message}")
+        Result.new(success: false, error: e.message)
+      end
+
+      private
+
+      def send_to(inbox_id, target_phone)
         inbox = Inbox.find_by(id: inbox_id)
-        return Result.new(success: false, error: 'inbox_not_found') unless inbox
+        raise "inbox_not_found(#{inbox_id})" unless inbox
 
         contact_inbox = ContactInboxWithContactBuilder.new(
           inbox: inbox,
           contact_attributes: { phone_number: normalize_phone(target_phone), name: contact_name }
         ).perform
-        return Result.new(success: false, error: 'contact_error') unless contact_inbox
+        raise 'contact_error' unless contact_inbox
 
         conversation = ConversationBuilder.new(
           params: ActionController::Parameters.new({}).permit!,
@@ -54,30 +81,38 @@ module Meta
         image_url = creative_image_url
         AgentBots::RemoteMediaAttacher.build_attachments(message, [{ url: image_url, file_type: 'image' }]) if image_url.present?
         message.save!
-
-        @submission.update!(notified_whatsapp_at: Time.current)
-        Result.new(success: true)
-      rescue StandardError => e
-        Rails.logger.error("Meta::LeadAds::WhatsappNotifierService failed: #{e.class}: #{e.message}")
-        Result.new(success: false, error: e.message)
       end
 
-      private
-
-      def resolve_destination
+      # Devolve [[inbox_id, whatsapp_number], ...] — nunca um par só por
+      # suposição: se enabled=true mas a lista de canais está vazia, não cai
+      # silenciosamente pro padrão da conta (seria notificar no lugar errado).
+      def resolve_destinations
         setting = MetaLeadNotificationSetting.find_by(form_id: @submission.form_id)
-        return [nil, nil] if setting && !setting.enabled
+        return [] if setting && !setting.enabled
 
-        if setting&.enabled && setting.inbox_id.present? && setting.whatsapp_number.present?
-          return [setting.inbox_id, setting.whatsapp_number]
+        if setting&.enabled
+          channels = setting.effective_channels
+          return channels.filter_map { |c| [c['inbox_id'], c['whatsapp_number']] if c['inbox_id'].present? && c['whatsapp_number'].present? }
         end
 
-        return [nil, nil] unless account_default_enabled?
+        return [] unless account_default_enabled?
 
-        [
-          GlobalConfigService.load('META_LEADS_NOTIFY_INBOX_ID', nil),
-          GlobalConfigService.load('META_LEADS_NOTIFY_WHATSAPP_NUMBER', nil)
-        ]
+        account_default_channels
+      end
+
+      def account_default_channels
+        raw = GlobalConfigService.load('META_LEADS_NOTIFY_CHANNELS', nil)
+        if raw.present?
+          parsed = JSON.parse(raw) rescue [] # rubocop:disable Style/RescueModifier -- config legível por humanos no admin, JSON inválido não deve derrubar a notificação
+          return Array(parsed).filter_map { |c| [c['inbox_id'], c['whatsapp_number']] if c['inbox_id'].present? && c['whatsapp_number'].present? }
+        end
+
+        # Fallback: quem configurou antes de META_LEADS_NOTIFY_CHANNELS existir.
+        legacy_inbox = GlobalConfigService.load('META_LEADS_NOTIFY_INBOX_ID', nil)
+        legacy_phone = GlobalConfigService.load('META_LEADS_NOTIFY_WHATSAPP_NUMBER', nil)
+        return [] if legacy_inbox.blank? || legacy_phone.blank?
+
+        [[legacy_inbox, legacy_phone]]
       end
 
       def account_default_enabled?
