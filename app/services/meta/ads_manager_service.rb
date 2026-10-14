@@ -999,7 +999,7 @@ class Meta::AdsManagerService
 
     leads = []
     url = "#{BASE_URL}/#{form_id}/leads?" + URI.encode_www_form(
-      fields: 'id,created_time,field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name',
+      fields: 'id,created_time,field_data,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,platform,is_organic',
       limit: 100,
       access_token: token.data
     )
@@ -1025,6 +1025,7 @@ class Meta::AdsManagerService
     end
 
     enrich_leads_with_creative!(leads)
+    enrich_leads_with_targeting_context!(leads)
     Result.new(success: true, data: leads)
   rescue StandardError => e
     Rails.logger.error "Meta::AdsManagerService: GET /#{form_id}/leads error: #{e.message}"
@@ -1088,6 +1089,52 @@ class Meta::AdsManagerService
       lead['criativo_video'] = creative[:video]
       lead['criativo_link'] = creative[:link]
     end
+  end
+
+  # Idade/gênero/dispositivo do INDIVÍDUO que converteu não existem na Graph
+  # API por lead (é dado pessoal — a Meta não expõe isso, só agregado em
+  # insights de campanha). O que é real e acessível: o público-alvo
+  # CONFIGURADO no conjunto de anúncios que gerou o lead (targeting do
+  # adset) — faixa etária, gêneros, plataformas e dispositivos que o
+  # anúncio foi direcionado. Não é "o lead tinha N anos", é "o anúncio que
+  # trouxe esse lead mirava nessa faixa etária". Pedido do Marco pedia
+  # "idade, gênero, dispositivo, plataforma" — essa é a interpretação
+  # tecnicamente honesta do que dá pra entregar.
+  def enrich_leads_with_targeting_context!(leads)
+    unique_adset_ids = leads.filter_map { |l| l['adset_id'] }.uniq
+    return if unique_adset_ids.empty?
+
+    targeting_by_adset_id = unique_adset_ids.each_with_object({}) do |adset_id, memo|
+      memo[adset_id] = adset_targeting_summary(adset_id)
+    end
+
+    leads.each do |lead|
+      targeting = targeting_by_adset_id[lead['adset_id']]
+      next unless targeting
+
+      lead['publico_alvo'] = targeting
+    end
+  end
+
+  def adset_targeting_summary(adset_id)
+    result = get("/#{adset_id}", fields: 'targeting')
+    return nil unless result.success
+
+    targeting = result.data['targeting'] || {}
+    genders = Array(targeting['genders'])
+    {
+      idade_min: targeting['age_min'],
+      idade_max: targeting['age_max'],
+      # genders: [] (ausente) = sem restrição, a Meta mostra como "Todos" na
+      # UI do Gerenciador de Anúncios -- replica a mesma leitura aqui.
+      generos: genders.empty? ? 'Todos' : genders.map { |g| g == 1 ? 'Homens' : 'Mulheres' }.join(', '),
+      plataformas: Array(targeting['publisher_platforms']),
+      dispositivos: Array(targeting['device_platforms']),
+      localizacoes: targeting.dig('geo_locations', 'cities')&.map { |c| c['name'] } || []
+    }
+  rescue StandardError => e
+    Rails.logger.error "Meta::AdsManagerService#adset_targeting_summary(#{adset_id}): #{e.message}"
+    nil
   end
 
   # `effective_object_story_id` vem como "<page_id>_<post_id>" — formato
