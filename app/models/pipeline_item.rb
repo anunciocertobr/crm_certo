@@ -88,6 +88,7 @@ class PipelineItem < ApplicationRecord
   after_update :publish_pipeline_item_updated
   after_update :publish_pipeline_item_completed, if: :saved_change_to_completed_at?
   after_update_commit :send_lead_quality_to_meta, if: :saved_change_to_lead_quality?
+  after_update_commit :send_conversion_to_meta, if: :saved_change_to_completed_at?
   after_destroy :publish_pipeline_item_deleted
 
   scope :in_stage, ->(stage) { where(pipeline_stage: stage) }
@@ -516,6 +517,16 @@ class PipelineItem < ApplicationRecord
   # do anúncio) — não queremos isso na request que salvou a qualificação.
   def send_lead_quality_to_meta
     Meta::SendLeadQualityJob.perform_later(id)
+  end
+
+  # Mesmo gatilho de publish_pipeline_item_completed acima (completed_at indo
+  # de blank pra presente) -- só dispara na transição real pra "concluído",
+  # não em qualquer toque no registro.
+  def send_conversion_to_meta
+    old_value, new_value = saved_change_to_completed_at || [nil, nil]
+    return unless new_value.present? && old_value.blank?
+
+    Meta::SendConversionJob.perform_later(id)
   end
 
   public
