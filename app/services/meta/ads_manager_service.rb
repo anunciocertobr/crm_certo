@@ -915,11 +915,46 @@ class Meta::AdsManagerService
     Result.new(success: true, data: result.data['access_token'])
   end
 
+  # Página com muitos formulários (ex.: contas com dezenas de formulários
+  # acumulados) nunca mostrava todos — a Graph API limita a ~25 resultados
+  # por página de resposta e `get` (helper acima) descarta `paging.next`,
+  # então só os 25 primeiros apareciam. Pagina até o fim, mesmo padrão já
+  # usado em leadgen_form_leads.
   def leadgen_forms(page_id:)
     token = resolve_page_token(page_id)
     return token unless token.success
 
-    get("/#{page_id}/leadgen_forms", { fields: 'id,name,status,leads_count,created_time' }, token.data)
+    forms = []
+    url = "#{BASE_URL}/#{page_id}/leadgen_forms?" + URI.encode_www_form(
+      fields: 'id,name,status,leads_count,created_time',
+      limit: 100,
+      access_token: token.data
+    )
+
+    MAX_LEAD_PAGES.times do
+      uri = URI(url)
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = true
+      http.read_timeout = 30
+      response = http.request(Net::HTTP::Get.new(uri.request_uri))
+      body = JSON.parse(response.body)
+
+      unless response.code.to_i.between?(200, 299)
+        Rails.logger.error "Meta::AdsManagerService: GET /#{page_id}/leadgen_forms -> #{response.code} #{response.body}"
+        return Result.new(success: false, error: graph_error_message(body, 'Falha ao buscar os formulários desta Página.'))
+      end
+
+      forms.concat(body['data'] || [])
+      next_url = body.dig('paging', 'next')
+      break unless next_url
+
+      url = next_url
+    end
+
+    Result.new(success: true, data: forms)
+  rescue StandardError => e
+    Rails.logger.error "Meta::AdsManagerService: GET /#{page_id}/leadgen_forms error: #{e.message}"
+    Result.new(success: false, error: 'Erro inesperado ao buscar os formulários desta Página.')
   end
 
   def leadgen_form_detail(page_id:, form_id:)
