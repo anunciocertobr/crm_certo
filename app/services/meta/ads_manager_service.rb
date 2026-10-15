@@ -293,7 +293,14 @@ class Meta::AdsManagerService
 
     result = get(
       "/#{campaign_id}/adsets",
-      fields: 'id,ads{id,creative{name,body,title,image_url,thumbnail_url,video_id,' \
+      # `ads.limit(100)`: sem limit explícito aqui, a edge aninhada cai no
+      # default de 25 da Graph API e anúncios além do 25º do conjunto somem
+      # silenciosamente (sem erro) — "Duplicar campanha" então duplicava com
+      # criativo vazio (sem texto/título/descrição/imagem) pra esses
+      # anúncios, porque `creatives_by_ad_id` nunca tinha entrada pra eles.
+      # 100 cobre qualquer conjunto real desta conta; se algum dia existir
+      # um conjunto com mais que isso, o sintoma volta igual.
+      fields: 'id,ads.limit(100){id,creative{name,body,title,image_url,thumbnail_url,video_id,' \
               'object_story_spec{page_id,link_data{description,name,message,call_to_action,picture,child_attachments},' \
               'video_data{title,message,image_url}}}}',
       limit: 200
@@ -2317,6 +2324,43 @@ class Meta::AdsManagerService
     fetch_external_asset(normalize_public_url(url))
   end
 
+  # Duplicação de anúncio em carrossel: reaproveita os cartões do carrossel
+  # de origem (nome/descrição/link + imagem de cada um), baixando a imagem
+  # de cada cartão e montando o formato que build_carousel_creative já sabe
+  # subir — a Meta não deixa reaproveitar o image_hash de outra conta/
+  # anúncio sem re-upload, então é um upload novo por cartão, igual ao fluxo
+  # manual de criar carrossel. Antes desse método, duplicar um anúncio em
+  # carrossel virava anúncio de imagem única (só o primeiro cartão, se
+  # achasse thumbnail) — `resolve_asset_from_source_ad`/
+  # `resolve_creative_source_asset` nunca olhavam `child_attachments`.
+  #
+  # Só cartão de IMAGEM é suportado por enquanto — cartão de vídeo exigiria
+  # upload por vídeo em vez de `/adimages`, que `build_carousel_creative`
+  # não faz ainda. Se algum cartão não tiver imagem resolvível (carrossel
+  # com vídeo), devolve nil de propósito e quem chamou cai de volta pro
+  # caminho de imagem única, em vez de criar um carrossel pela metade.
+  def resolve_carousel_items_from_source_ad(ad_id_origem)
+    criativo = get(
+      "/#{ad_id_origem}",
+      fields: 'creative{object_story_spec{link_data{link,child_attachments{name,description,link,picture,video_id}}}}'
+    )
+    return nil unless criativo.success
+
+    attachments = criativo.data.to_h.dig('creative', 'object_story_spec', 'link_data', 'child_attachments')
+    return nil unless attachments.is_a?(Array) && attachments.size > 1
+
+    attachments.map do |card|
+      picture_url = card['picture']
+      return nil if picture_url.blank?
+
+      asset = fetch_external_asset(normalize_public_url(picture_url))
+      return nil unless asset.success
+
+      base64, = asset.data
+      { 'asset_base64' => base64, 'title' => card['name'], 'description' => card['description'], 'link' => card['link'] }
+    end
+  end
+
   # Site cadastrado na própria Página do Facebook (campo `website`) — usado
   # como o link EXTERNO que o criativo de anúncio de Geração de Cadastros
   # exige (ver #build_creative). O formulário continua abrindo dentro do
@@ -2554,6 +2598,9 @@ class Meta::AdsManagerService
     return build_carousel_creative(act: act, campanha: campanha) if campanha['carousel_items'].is_a?(Array) && campanha['carousel_items'].any?
 
     if campanha['ad_id_origem'].present?
+      carousel_items = resolve_carousel_items_from_source_ad(campanha['ad_id_origem'])
+      return build_carousel_creative(act: act, campanha: campanha.merge('carousel_items' => carousel_items)) if carousel_items.present?
+
       asset = resolve_asset_from_source_ad(campanha['ad_id_origem'])
     else
       asset = resolve_asset(campanha)
