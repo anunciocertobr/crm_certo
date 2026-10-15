@@ -547,6 +547,11 @@ class Meta::AdsManagerService
     adsets_specs = campanha['adsets'].presence || [campanha]
     primary_page_id = adsets_specs.first&.dig('page_id').presence || campanha['page_id']
     return Result.new(success: false, error: 'Página do Facebook sem page_id configurado (necessário pro criativo).') if primary_page_id.blank?
+    # Mesmo raciocínio do page_id acima: só existe um formulário por
+    # campanha aqui (criado uma vez, reaproveitado em todos os conjuntos),
+    # e o front só deixa escolher formulário por conjunto — usa o do
+    # primeiro conjunto que tiver um escolhido.
+    primary_lead_form_id = adsets_specs.map { |a| a['lead_form_id'] }.compact.first.presence || campanha['lead_form_id']
 
     act = "act_#{ad_account_id}"
     lead_form_id = nil
@@ -554,7 +559,7 @@ class Meta::AdsManagerService
 
     begin
       if lead_flow?(campanha)
-        lead_form = create_lead_form(campanha: campanha.merge('page_id' => primary_page_id))
+        lead_form = create_lead_form(campanha: campanha.merge('page_id' => primary_page_id, 'lead_form_id' => primary_lead_form_id))
         return step_error(lead_form, 'formulário de cadastro') unless lead_form.success
 
         lead_form_id = lead_form.data['id']
@@ -756,11 +761,24 @@ class Meta::AdsManagerService
     ads_specs = adset_spec['ads'].presence || [adset_spec]
     created_ads = []
     ads_specs.each do |ad_spec|
-      # `page_id` só vem no `adset_spec` (é lá que o front deixa escolher a
-      # Página) — sem herdar aqui, `page_id_for` dentro de `build_creative`
-      # caía no fallback `@page&.page_id` (Página padrão da integração, não
-      # a escolhida) e a validação de site cadastrado batia na Página errada.
-      ad_spec = ad_spec.merge('page_id' => ad_spec['page_id'] || adset_spec['page_id'])
+      # `page_id`/`optimization_goal`/`mensagem_destino`/`message_template`
+      # só vêm no `adset_spec` (é lá que o front deixa escolher Página/meta/
+      # destino da conversa/modelo de mensagem, nunca por anúncio individual)
+      # — sem herdar aqui, duas coisas quebravam dentro de `build_creative`:
+      # `page_id_for` caía no fallback `@page&.page_id` (Página padrão da
+      # integração, não a escolhida) e a validação de site cadastrado batia
+      # na Página errada; e `messaging_flow?`/`mensagem_destination_type`
+      # (que só leem `campanha['optimization_goal']`/`['mensagem_destino']`
+      # direto, sem o fallback multi-nível que `lead_flow?` tem) nunca viam
+      # verdadeiro — TODO anúncio de conversa criado por aqui saía com CTA
+      # "Saiba mais" genérico em vez do botão de WhatsApp/Messenger de
+      # verdade (confirmado numa campanha real em produção, ver commit).
+      ad_spec = ad_spec.merge(
+        'page_id' => ad_spec['page_id'] || adset_spec['page_id'],
+        'optimization_goal' => ad_spec['optimization_goal'] || adset_spec['optimization_goal'],
+        'mensagem_destino' => ad_spec['mensagem_destino'] || adset_spec['mensagem_destino'],
+        'message_template' => ad_spec['message_template'] || adset_spec['message_template']
+      )
       creative = build_creative(act: act, campanha: ad_spec, lead_form_id: lead_form_id)
       return step_error(creative, 'criativo') unless creative.success
 
@@ -2697,6 +2715,16 @@ class Meta::AdsManagerService
                    }
                  end
 
+    # "Modelo de mensagem" (AdSetMetaFields) — mensagem pronta sugerida a
+    # quem abre a conversa a partir do anúncio. Confirmado ao vivo (conta de
+    # teste 588639403580243) que `message_send_param` só é aceito como
+    # IRMÃO de `link_data`/`video_data` dentro de object_story_spec — a
+    # Graph API recusa com o subcode 1443050 ("campo incompatível") quando
+    # vai aninhado dentro de link_data, que seria o lugar mais intuitivo.
+    if messaging_flow?(campanha) && campanha['message_template'].present?
+      story_spec[:message_send_param] = { message: { text: campanha['message_template'] } }
+    end
+
     post("/#{act}/adcreatives", { object_story_spec: story_spec.to_json })
   end
 
@@ -2999,6 +3027,13 @@ class Meta::AdsManagerService
   # `campanha` se informadas, com um padrão razoável (nome + email,
   # política de privacidade do domínio da página) senão.
   def create_lead_form(campanha:)
+    # Formulário já existente escolhido no formulário (ver AdSetMetaFields,
+    # seletor de "Formulário") — reaproveita em vez de criar um novo
+    # genérico. Antes disso, criar/duplicar campanha de Formulário SEMPRE
+    # gerava um formulário novo (nome padrão, só Nome+Email), mesmo
+    # duplicando um anúncio que já usava um formulário de verdade.
+    return Result.new(success: true, data: { 'id' => campanha['lead_form_id'] }) if campanha['lead_form_id'].presence
+
     questions = campanha['lead_questions'].presence || [{ type: 'FULL_NAME' }, { type: 'EMAIL' }]
     privacy_url = campanha['privacy_policy_url'].presence || 'https://www.anunciocertobr.com.br/privacidade'
 
