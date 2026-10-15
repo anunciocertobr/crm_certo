@@ -72,10 +72,11 @@ class Google::AdsInfrastructureService
   end
 
   # Passo 7: cria um asset de sitelink em nível de conta.
-  def create_sitelink_asset(customer_id:, link_text:, final_url:)
-    mutate(customer_id, 'assets', [{
-      create: { type: 'SITELINK', sitelinkAsset: { linkText: link_text, finalUrls: [final_url] } }
-    }])
+  def create_sitelink_asset(customer_id:, link_text:, final_url:, description1: nil, description2: nil)
+    sitelink_asset = { linkText: link_text, finalUrls: [final_url] }
+    sitelink_asset[:description1] = description1 if description1.present?
+    sitelink_asset[:description2] = description2 if description2.present?
+    mutate(customer_id, 'assets', [{ create: { type: 'SITELINK', sitelinkAsset: sitelink_asset } }])
   end
 
   # Passo 8: vincula a sub-conta ao MCC (relação de gerenciamento).
@@ -88,7 +89,117 @@ class Google::AdsInfrastructureService
     mutate(customer_id, 'customerManagerLink', [{ create: { managerCustomer: "customers/#{mcc}", status: 'ACTIVE' } }])
   end
 
+  # --- Extensões/ativos da Criação Google Ads (GoogleAdsAsset) ---
+  # Cada create_* monta o corpo específico do tipo de Asset e delega pro
+  # mutate genérico. Nunca testado contra a API real ainda (nenhuma conta
+  # Google Ads tem customer_id selecionado em produção até agora — ver
+  # GoogleAdsAuthorizationsController) — os nomes de campo seguem o schema
+  # documentado da Google Ads API v19, mas o primeiro publish de verdade
+  # pode exigir ajuste fino se algum nome de enum estiver errado (o erro
+  # que a Google devolve costuma apontar o campo exato).
+
+  def create_callout_asset(customer_id:, callout_text:)
+    mutate(customer_id, 'assets', [{ create: { type: 'CALLOUT', calloutAsset: { calloutText: callout_text } } }])
+  end
+
+  def create_structured_snippet_asset(customer_id:, header:, values:)
+    mutate(customer_id, 'assets', [{
+      create: { type: 'STRUCTURED_SNIPPET', structuredSnippetAsset: { header: header, values: values } }
+    }])
+  end
+
+  def create_call_asset(customer_id:, country_code:, phone_number:)
+    mutate(customer_id, 'assets', [{
+      create: { type: 'CALL', callAsset: { countryCode: country_code, phoneNumber: phone_number } }
+    }])
+  end
+
+  def create_lead_form_asset(customer_id:, business_name:, headline:, description:, call_to_action_type:,
+                              privacy_policy_url:, question_fields:)
+    mutate(customer_id, 'assets', [{
+      create: {
+        type: 'LEAD_FORM',
+        leadFormAsset: {
+          businessName: business_name,
+          headline: headline,
+          description: description,
+          callToActionType: call_to_action_type,
+          privacyPolicyUrl: privacy_policy_url,
+          fields: question_fields.map { |f| { inputType: f } },
+          # Tela de confirmação pós-envio — campos obrigatórios na API,
+          # sem equivalente na nossa UI ainda, por isso um texto padrão.
+          postSubmitHeadline: 'Obrigado!',
+          postSubmitDescription: 'Recebemos seus dados, entraremos em contato em breve.'
+        }
+      }
+    }])
+  end
+
+  def create_price_asset(customer_id:, type:, price_qualifier:, offerings:, currency_code: 'BRL',
+                          language_code: 'pt-BR')
+    price_offerings = offerings.map do |o|
+      {
+        header: o[:header] || o['header'],
+        description: o[:description] || o['description'],
+        price: { amountMicros: (price_to_micros(o[:price] || o['price'])), currencyCode: currency_code },
+        unit: o[:unit] || o['unit'],
+        finalUrls: [o[:finalUrl] || o['finalUrl']]
+      }.compact
+    end
+    price_asset = { type: type, languageCode: language_code, priceOfferings: price_offerings }
+    price_asset[:priceQualifier] = price_qualifier if price_qualifier.present?
+    mutate(customer_id, 'assets', [{ create: { type: 'PRICE', priceAsset: price_asset } }])
+  end
+
+  # `image_base64` já vem sem o prefixo "data:image/...;base64,".
+  def create_image_asset(customer_id:, image_base64:, name: nil)
+    image_asset = { data: image_base64 }
+    create_op = { type: 'IMAGE', imageAsset: image_asset }
+    create_op[:name] = name if name.present?
+    mutate(customer_id, 'assets', [{ create: create_op }])
+  end
+
+  # Liga um asset já criado à CONTA inteira (aparece em todas as campanhas
+  # elegíveis) — usado quando a publicação não aponta pra uma campanha
+  # específica.
+  def link_asset_to_account(customer_id:, asset_resource_name:, field_type:)
+    mutate(customer_id, 'customerAssets', [{
+      create: { asset: asset_resource_name, fieldType: field_type }
+    }])
+  end
+
+  # Liga um asset já criado a UMA campanha específica.
+  def link_asset_to_campaign(customer_id:, campaign_resource_name:, asset_resource_name:, field_type:)
+    mutate(customer_id, 'campaignAssets', [{
+      create: { campaign: campaign_resource_name, asset: asset_resource_name, fieldType: field_type }
+    }])
+  end
+
+  # Listagem leve (sem métricas) pra popular o seletor "publicar nesta
+  # campanha" — Google::AdsInsightsService#campaigns é relatório (exige
+  # intervalo de datas), este método é só pra escolher o alvo da publicação.
+  def list_campaigns(customer_id:)
+    search(customer_id, <<~GAQL)
+      SELECT campaign.id, campaign.name, campaign.status
+      FROM campaign
+      WHERE campaign.status != 'REMOVED'
+      ORDER BY campaign.name
+    GAQL
+  end
+
   private
+
+  def price_to_micros(value)
+    (BigDecimal(value.to_s) * 1_000_000).to_i
+  end
+
+  def search(customer_id, gaql)
+    result = post("/customers/#{customer_id.to_s.gsub(/\D/, '')}/googleAds:search", { query: gaql.squish })
+    return result unless result.success
+
+    rows = (result.data['results'] || []).map { |r| r['campaign'] }.compact
+    Result.new(success: true, data: rows)
+  end
 
   def login_customer_id
     @hook&.settings&.dig('login_customer_id').to_s.gsub(/\D/, '').presence

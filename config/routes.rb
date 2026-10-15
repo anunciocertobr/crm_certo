@@ -85,7 +85,14 @@ Rails.application.routes.draw do
       end
       namespace :marketing do
         resources :client_goals
-        resources :google_ads_assets, only: %i[index create update destroy]
+        resources :google_ads_assets, only: %i[index create update destroy] do
+          member do
+            post :publish
+          end
+          collection do
+            get :campaigns
+          end
+        end
         resources :report_links, only: %i[index create] do
           member do
             patch :revoke
