@@ -1,43 +1,90 @@
-# Client de NFS-e pra Guarulhos, via GissOnline (padrão ABRASF 2.04).
-# Autenticação por certificado A1 (mTLS) + assinatura XMLDSig no
-# InfDeclaracaoPrestacaoServico. Segue o mesmo formato de app/services/ifood/client.rb
-# (Error aninhada, sem retry interno — isso fica pro job/Sidekiq).
+# Client de NFS-e para Guarulhos, via GissOnline (padrão eicon/ABRASF 2.04).
 #
-# URLs de WSDL abaixo são as documentadas publicamente pro padrão GissOnline;
-# confirmar contra o manual do GissOnline de Guarulhos antes do primeiro
-# teste real em homologação (não dá pra validar isso sem certificado + acesso
-# real, ver plano).
+# Cada operação recebe DOIS parâmetros string no corpo SOAP (`nfseCabecMsg`,
+# com o cabeçalho de versão, e `nfseDadosMsg`, com a mensagem em si) e devolve
+# um único `outputXML`. Confirmado contra o WSDL real
+# (`https://ws-guarulhos.giss.com.br/service-ws/nf/nfse-ws?wsdl`) e o manual
+# oficial de integração (NFS-e Manual de Integração V 2.03).
+#
+# Por isso NÃO usamos Savon: o WSDL é eicon (wrapper genérico `input`/`output`),
+# o que faz o Savon gerar um envelope incompatível. Montamos o envelope SOAP na
+# mão e usamos Net::HTTP com mTLS (certificado A1) — determinístico e sem
+# surpresa de namespace.
+#
+# Namespaces: os dados usam o namespace Giss
+# (`http://www.giss.com.br/<schema>-v2_04.xsd`), NÃO o abrasf.org.br clássico.
+# O cabeçalho também tem namespace próprio (`cabecalho-v2_04.xsd`) — com o
+# namespace antigo a prefeitura responde `E183` ("cabeçalho fora do padrão")
+# antes mesmo de olhar o resto do XML.
+#
+# Emissão: `GerarNfse` e `RecepcionarLoteRpsSincrono` respondem `A01` mesmo com
+# o XML correto, então só o lote ASSÍNCRONO (`RecepcionarLoteRps`) emite. Ele
+# devolve um protocolo e a nota é resolvida depois via `ConsultarLoteRps` (o
+# `ServiceInvoices::PollStatusJob` faz a consulta). O RPS vira `processing`
+# após o protocolo e `authorized`/`error` depois da consulta.
+#
+# Assinatura XMLDSig (RSA-SHA1, C14N 1.0): cada RPS é assinado individualmente
+# (Signature DENTRO de cada `<Rps>`, referenciando o `InfDeclaracaoPrestacaoServico`
+# pelo Id) E o lote é assinado no final (Signature na raiz, referenciando o
+# `LoteRps` pelo Id). Assinar só o lote devolve `E174`; usar `URI=""` na
+# assinatura do lote invalida as assinaturas dos RPS e também dá `E174`.
+#
+# Autenticação: certificado A1 (mTLS) na conexão + a assinatura acima. O CNPJ do
+# prestador é lido do próprio certificado (o subject ICP-Brasil traz
+# "RAZAO SOCIAL:CNPJ" no CN), com fallback pro GlobalConfig.
 module Guarulhos
   class Client < NotaFiscal::ProviderClient
-    class Error < StandardError; end
+    class Error < NotaFiscal::ProviderClient::Error; end
 
-    WSDL_URLS = {
-      'homologacao' => 'https://guarulhos.giss.com.br/homologacao/ws/nfse.wsdl',
-      'producao' => 'https://guarulhos.giss.com.br/producao/ws/nfse.wsdl'
-    }.freeze
+    ENDPOINT = 'https://ws-guarulhos.giss.com.br/service-ws/nf/nfse-ws'.freeze
+    SOAP_NS = 'http://nfse.abrasf.org.br'.freeze
+    DSIG_NS = 'http://www.w3.org/2000/09/xmldsig#'.freeze
+    NS_BASE = 'http://www.giss.com.br'.freeze
+    DATA_VERSION = '2.04'.freeze
 
-    NAMESPACE = 'http://www.abrasf.org.br/nfse.xsd'.freeze
+    C14N = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315'.freeze
+    RSA_SHA1 = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1'.freeze
+    SHA1_NS = 'http://www.w3.org/2000/09/xmldsig#sha1'.freeze
+    ENVELOPED = 'http://www.w3.org/2000/09/xmldsig#enveloped-signature'.freeze
+
+    # Código de país do Brasil (tsCodigoPaisIbge, 4 dígitos, tabela ISO/IBGE:
+    # 076 -> "0076"). O manual cita "Bacen" e sugere 1058, mas o serviço recusa
+    # esse valor com E384; 0076 é o que a implementação de referência envia.
+    # Sem o campo a prefeitura responde E383.
+    CODIGO_PAIS_BRASIL = '0076'.freeze
+
+    # Prefixo do namespace de tipos (onde vivem tcLoteRps, tcDadosServico, etc.).
+    T = 'tipos'.freeze
 
     def emitir(invoice)
-      xml = sign(build_rps_xml(invoice))
-      response = call_soap(:recepcionar_lote_rps, envelope_body(xml))
-      apply_emissao_response(invoice, response)
-    rescue Savon::Error, OpenSSL::OpenSSLError, Xmldsig::Error => e
+      xml = sign(build_lote_xml(invoice))
+      invoice.xml_envio = xml
+      invoice.save!
+      output = soap_call('RecepcionarLoteRps', xml)
+      apply_recepcao_response(invoice, output)
+    rescue Error
+      raise
+    rescue StandardError => e
       raise Error, "Falha ao emitir NFS-e Guarulhos: #{e.message}"
     end
 
     def consultar_situacao(invoice)
-      response = call_soap(:consultar_situacao_lote_rps, consulta_situacao_body(invoice))
-      apply_situacao_response(invoice, response)
-    rescue Savon::Error => e
+      return invoice if invoice.protocolo.blank?
+
+      output = soap_call('ConsultarLoteRps', sign(build_consulta_xml(invoice)))
+      apply_situacao_response(invoice, output)
+    rescue Error
+      raise
+    rescue StandardError => e
       raise Error, "Falha ao consultar situação NFS-e Guarulhos: #{e.message}"
     end
 
     def cancelar(invoice)
-      xml = sign(build_cancelamento_xml(invoice))
-      response = call_soap(:cancelar_nfse, envelope_body(xml))
-      apply_cancelamento_response(invoice, response)
-    rescue Savon::Error, OpenSSL::OpenSSLError, Xmldsig::Error => e
+      output = soap_call('CancelarNfse', sign(build_cancelamento_xml(invoice)))
+      apply_cancelamento_response(invoice, output)
+    rescue Error
+      raise
+    rescue StandardError => e
       raise Error, "Falha ao cancelar NFS-e Guarulhos: #{e.message}"
     end
 
@@ -47,245 +94,463 @@ module Guarulhos
       @pkcs12 ||= @establishment.certificate_pkcs12
     end
 
-    def wsdl_url
-      WSDL_URLS.fetch(@establishment.ambiente)
+    # O CNPJ do prestador tem que ser o do certificado usado (o manual exige que
+    # o certificado de assinatura contenha o CNPJ do emissor). Extraímos do
+    # subject (padrão ICP-Brasil: CN = "RAZAO SOCIAL:CNPJ") e só caímos no
+    # GlobalConfig se o certificado não trouxer nada.
+    def prestador_cnpj
+      @prestador_cnpj ||= begin
+        subject = pkcs12.certificate.subject.to_s
+        subject[/CN=[^\/]*?:(\d{14})/, 1] || subject[/\d{14}/] || org_cnpj_digits
+      end
     end
 
-    def soap_client
-      @soap_client ||= Savon.client(
-        wsdl: wsdl_url,
-        ssl_client_cert: pkcs12.certificate,
-        ssl_client_key: pkcs12.key,
-        ssl_verify_mode: :peer,
-        log: !Rails.env.production?,
-        raise_errors: false,
-        convert_request_keys_to: :none
-      )
+    def org_cnpj_digits
+      GlobalConfigService.load('ORG_CNPJ', '').to_s.gsub(/\D/, '')
     end
 
-    def call_soap(operation, body)
-      response = soap_client.call(operation, message: body)
-      raise Error, "SOAP fault do webservice de Guarulhos: #{response.http.body}" unless response.success?
+    # ------------------------------------------------------------------ XML
 
-      response
+    def giss_ns(schema)
+      "#{NS_BASE}/#{schema}-v#{DATA_VERSION.tr('.', '_')}.xsd"
     end
 
-    # Monta o XML do Rps no formato ABRASF 2.04. A tag <Signature> fica
-    # ANINHADA dentro do elemento com o Id referenciado (InfDeclaracaoPrestacaoServico),
-    # não como irmã dele — só assim o transform "enveloped-signature" do
-    # XMLDSig consegue achar e remover a própria assinatura antes de calcular
-    # o hash (senão vira referência circular). Confirmado com um spike real
-    # (certificado autoassinado, gem xmldsig 0.7.0) antes de escrever isto.
-    def build_rps_xml(invoice)
-      estab = @establishment
-      endereco = invoice.tomador_endereco || {}
-      rps_id = "rps#{invoice.serie_rps}#{invoice.numero_rps}"
+    def tipos(name)
+      "#{T}:#{name}"
+    end
 
-      Nokogiri::XML::Builder.new do |xml|
-        xml.Rps(xmlns: NAMESPACE) do
-          xml.InfDeclaracaoPrestacaoServico(Id: rps_id) do
-            xml.Rps do
-              xml.IdentificacaoRps do
-                xml.Numero invoice.numero_rps
-                xml.Serie invoice.serie_rps
-                xml.Tipo '1'
-              end
-              xml.DataEmissao invoice.created_at.strftime('%Y-%m-%d')
-              xml.Status '1'
-            end
-            xml.Competencia invoice.created_at.strftime('%Y-%m-%d')
-            xml.Servico do
-              xml.Valores do
-                xml.ValorServicos format('%.2f', invoice.valor_servicos)
-                xml.ValorDeducoes format('%.2f', invoice.valor_deducoes)
-                xml.ValorIss format('%.2f', invoice.valor_iss)
-                xml.Aliquota format('%.4f', invoice.aliquota_iss_pct.to_f / 100)
-              end
-              xml.IssRetido '2'
-              xml.ItemListaServico invoice.codigo_servico_municipal
-              xml.Discriminacao invoice.discriminacao
-              xml.CodigoMunicipio estab.municipio_ibge_code
-            end
-            xml.Prestador do
-              xml.CpfCnpj do
-                xml.Cnpj org_cnpj_digits
-              end
-              xml.InscricaoMunicipal estab.inscricao_municipal
-            end
-            xml.Tomador do
-              xml.IdentificacaoTomador do
-                xml.CpfCnpj do
-                  cpf_cnpj_node(xml, invoice.tomador_cpf_cnpj)
-                end
-              end
-              xml.RazaoSocial invoice.tomador_nome
-              if endereco.present?
-                xml.Endereco do
-                  xml.Endereco endereco['logradouro']
-                  xml.Numero endereco['numero']
-                  xml.Bairro endereco['bairro']
-                  xml.CodigoMunicipio endereco['codigo_municipio']
-                  xml.Uf endereco['uf']
-                  xml.Cep endereco['cep']
-                end
-              end
-              xml.Contato do
-                xml.Email invoice.tomador_email if invoice.tomador_email.present?
-              end
-            end
-            xml.Signature(xmlns: 'http://www.w3.org/2000/09/xmldsig#') do
-              xml.SignedInfo do
-                xml.CanonicalizationMethod(Algorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315')
-                xml.SignatureMethod(Algorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1')
-                xml.Reference(URI: "##{rps_id}") do
-                  xml.Transforms do
-                    xml.Transform(Algorithm: 'http://www.w3.org/2000/09/xmldsig#enveloped-signature')
-                  end
-                  xml.DigestMethod(Algorithm: 'http://www.w3.org/2000/09/xmldsig#sha1')
-                  xml.DigestValue
-                end
-              end
-              xml.SignatureValue
-              xml.KeyInfo do
-                xml.X509Data do
-                  xml.X509Certificate x509_certificate_base64
-                end
-              end
-            end
-          end
-        end
-      end.to_xml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XML | Nokogiri::XML::Node::SaveOptions::NO_DECLARATION)
+    def xml_declaration
+      '<?xml version="1.0" encoding="UTF-8"?>'
+    end
+
+    def root_element(name, body)
+      %(<#{name} xmlns="#{giss_ns(name_to_schema(name))}" xmlns:#{T}="#{giss_ns('tipos')}">#{body}</#{name}>)
+    end
+
+    def name_to_schema(name)
+      {
+        'EnviarLoteRpsEnvio' => 'enviar-lote-rps-envio',
+        'ConsultarLoteRpsEnvio' => 'consultar-lote-rps-envio',
+        'CancelarNfseEnvio' => 'cancelar-nfse-envio'
+      }.fetch(name)
+    end
+
+    def elem(name, value, attrs = {})
+      return '' if value.nil? || value.to_s.empty?
+
+      "<#{name}#{attrs_xml(attrs)}>#{escape_xml(value)}</#{name}>"
+    end
+
+    # Grupo que desaparece quando não tem filho nenhum (para opcionais).
+    def grp(name, children, attrs = {})
+      body = join_children(children)
+      return '' if body.empty?
+
+      "<#{name}#{attrs_xml(attrs)}>#{body}</#{name}>"
+    end
+
+    # Grupo obrigatório: mantém o elemento mesmo sem filhos.
+    def rgrp(name, children, attrs = {})
+      "<#{name}#{attrs_xml(attrs)}>#{join_children(children)}</#{name}>"
+    end
+
+    def join_children(children)
+      children.compact.reject { |c| c.to_s.empty? }.join
+    end
+
+    def attrs_xml(attrs)
+      attrs.reject { |_, v| v.nil? || v.to_s.empty? }
+           .map { |k, v| %( #{k}="#{escape_xml(v)}") }.join
+    end
+
+    def escape_xml(value)
+      value.to_s
+           .gsub('&', '&amp;').gsub('<', '&lt;').gsub('>', '&gt;')
+           .gsub('"', '&quot;').gsub("'", '&apos;')
+    end
+
+    def amount(value)
+      return nil if value.nil? || value.to_s.empty?
+
+      format('%.2f', value.to_f)
+    end
+
+    def iso_date(value)
+      value.respond_to?(:strftime) ? value.strftime('%Y-%m-%d') : value.to_s[0, 10]
+    end
+
+    def truncate(value, limit)
+      value.to_s.length > limit ? value.to_s[0, limit] : value.to_s
+    end
+
+    def rps_id(invoice)
+      "rps#{invoice.serie_rps}#{invoice.numero_rps}"
+    end
+
+    def lote_id(invoice)
+      "lote#{invoice.numero_rps}"
+    end
+
+    def cancel_id(invoice)
+      "canc#{invoice.numero_nfse}"
+    end
+
+    # ------------------------------------------------------------------ blocos
+
+    def prestador_party(tag, cnpj, inscricao)
+      rgrp(tag, [
+        rgrp(tipos('CpfCnpj'), [elem(tipos('Cnpj'), cnpj)]),
+        elem(tipos('InscricaoMunicipal'), inscricao)
+      ])
+    end
+
+    # No XML do Giss o ItemListaServico vai com ponto ("10.08", é essa a
+    # enumeração do schema); a chave da tabela de atividades é só dígitos.
+    def item_lista_servico(invoice)
+      invoice.codigo_servico_municipal.to_s.gsub(/\D/, '')
+    end
+
+    # Código de tributação municipal (tsCodigoTributacao, até 20 caracteres).
+    # A prefeitura não usa o item da LC 116: cada item mapeia para um código da
+    # tabela de atividades do município, obtido na rota pública
+    # `/service-atividade/api/atividade/v2/lista-atividades/3518800`.
+    # Não dá para derivar do item (um item tem várias atividades), então esta
+    # tabela guarda a atividade padrão de cada item usado pela empresa.
+    CODIGOS_TRIBUTACAO_MUNICIPIO = {
+      '1008' => '731220001', # Agenciamento de espaços publicitários
+      '1009' => '731140002', # Representação de veículos de comunicação
+      '1701' => '731900400', # Consultoria em publicidade
+      '1706' => '731900201'  # Promoção de vendas / publicidade
+    }.freeze
+
+    def codigo_tributacao_municipio(invoice)
+      override = invoice.codigo_tributacao_municipio if invoice.respond_to?(:codigo_tributacao_municipio)
+      override.presence || CODIGOS_TRIBUTACAO_MUNICIPIO[item_lista_servico(invoice)]
+    end
+
+    def cpf_cnpj_elem(value)
+      digits = value.to_s.gsub(/\D/, '')
+      digits.length > 11 ? elem(tipos('Cnpj'), digits) : elem(tipos('Cpf'), digits)
+    end
+
+    def servico_node(invoice)
+      rgrp(tipos('Servico'), [
+        rgrp(tipos('Valores'), [
+          elem(tipos('ValorServicos'), amount(invoice.valor_servicos)),
+          elem(tipos('ValorDeducoes'), amount(invoice.valor_deducoes)),
+          elem(tipos('ValorIss'), amount(invoice.valor_iss)),
+          # A alíquota vai como FRAÇÃO: 2% => 0.0200. Mandar o percentual cru
+          # (2.0) significa 200% e a prefeitura recusa com E165.
+          elem(tipos('Aliquota'), format('%.4f', invoice.aliquota_iss_pct.to_f / 100)),
+          # Carga tributária aproximada (Lei 12.741/2012). O município exige os
+          # percentuais ou o indicador de não destaque (Decreto 8.264/2014);
+          # indTotTrib=0 é o único valor aceito para "não informar".
+          rgrp(tipos('trib'), [
+            rgrp(tipos('totTrib'), [elem(tipos('indTotTrib'), '0')])
+          ])
+        ]),
+        elem(tipos('IssRetido'), '2'),
+        elem(tipos('ItemListaServico'), invoice.codigo_servico_municipal),
+        # Guarulhos exige o código de tributação municipal (E202 sem ele e E35
+        # se o código não existir na tabela do município); o manual marca 0-1,
+        # mas a prefeitura recusa o lote sem o campo.
+        elem(tipos('CodigoTributacaoMunicipio'), codigo_tributacao_municipio(invoice)),
+        elem(tipos('Discriminacao'), truncate(invoice.discriminacao, 2000)),
+        elem(tipos('CodigoMunicipio'), @establishment.municipio_ibge_code),
+        elem(tipos('CodigoPais'), CODIGO_PAIS_BRASIL),
+        elem(tipos('ExigibilidadeISS'), '1'),
+        elem(tipos('MunicipioIncidencia'), @establishment.municipio_ibge_code)
+      ])
+    end
+
+    def tomador_node(invoice)
+      rgrp(tipos('TomadorServico'), [
+        rgrp(tipos('IdentificacaoTomador'), [
+          rgrp(tipos('CpfCnpj'), [cpf_cnpj_elem(invoice.tomador_cpf_cnpj)])
+        ]),
+        elem(tipos('RazaoSocial'), truncate(invoice.tomador_nome, 150)),
+        endereco_node(invoice.tomador_endereco || {}),
+        contato_node(invoice)
+      ])
+    end
+
+    def endereco_node(endereco)
+      grp(tipos('Endereco'), [
+        elem(tipos('Endereco'), truncate(endereco['logradouro'], 125)),
+        elem(tipos('Numero'), endereco['numero']),
+        elem(tipos('Bairro'), endereco['bairro']),
+        elem(tipos('CodigoMunicipio'), endereco['codigo_municipio']),
+        elem(tipos('Uf'), endereco['uf']),
+        elem(tipos('Cep'), endereco['cep'])
+      ])
+    end
+
+    def contato_node(invoice)
+      return '' if invoice.tomador_email.blank?
+
+      rgrp(tipos('Contato'), [elem(tipos('Email'), invoice.tomador_email)])
+    end
+
+    def rps_node(invoice)
+      id = rps_id(invoice)
+      inf = rgrp(tipos('InfDeclaracaoPrestacaoServico'), [
+        rgrp(tipos('Rps'), [
+          rgrp(tipos('IdentificacaoRps'), [
+            elem(tipos('Numero'), invoice.numero_rps),
+            elem(tipos('Serie'), invoice.serie_rps),
+            elem(tipos('Tipo'), '1')
+          ]),
+          elem(tipos('DataEmissao'), iso_date(invoice.created_at)),
+          elem(tipos('Status'), '1')
+        ], Id: "#{id}i"),
+        elem(tipos('Competencia'), iso_date(invoice.created_at)),
+        servico_node(invoice),
+        prestador_party(tipos('Prestador'), prestador_cnpj, @establishment.inscricao_municipal),
+        tomador_node(invoice),
+        elem(tipos('OptanteSimplesNacional'), '2'),
+        elem(tipos('IncentivoFiscal'), '2')
+      ], Id: id)
+
+      # A Signature fica IRMÃ do InfDeclaracao (dentro do Rps), referenciando o
+      # Id do InfDeclaracao. É onde o schema a espera.
+      rgrp(tipos('Rps'), [inf, signature_placeholder(id)])
+    end
+
+    def build_lote_xml(invoice)
+      lote = rgrp('LoteRps', [
+        elem(tipos('NumeroLote'), invoice.numero_rps),
+        prestador_party(tipos('Prestador'), prestador_cnpj, @establishment.inscricao_municipal),
+        elem(tipos('QuantidadeRps'), '1'),
+        rgrp(tipos('ListaRps'), [rps_node(invoice)])
+      ], Id: lote_id(invoice), versao: DATA_VERSION)
+
+      xml_declaration + root_element('EnviarLoteRpsEnvio', lote + signature_placeholder(lote_id(invoice)))
+    end
+
+    def build_consulta_xml(invoice)
+      body = prestador_party('Prestador', prestador_cnpj, @establishment.inscricao_municipal) +
+             elem('Protocolo', invoice.protocolo) +
+             signature_placeholder('')
+
+      xml_declaration + root_element('ConsultarLoteRpsEnvio', body)
     end
 
     def build_cancelamento_xml(invoice)
-      cancel_id = "cancel#{invoice.numero_nfse}"
+      id = cancel_id(invoice)
+      pedido = rgrp('Pedido', [
+        rgrp(tipos('InfPedidoCancelamento'), [
+          rgrp(tipos('IdentificacaoNfse'), [
+            elem(tipos('Numero'), invoice.numero_nfse),
+            rgrp(tipos('CpfCnpj'), [elem(tipos('Cnpj'), prestador_cnpj)]),
+            elem(tipos('InscricaoMunicipal'), @establishment.inscricao_municipal),
+            elem(tipos('CodigoMunicipio'), @establishment.municipio_ibge_code)
+          ]),
+          elem(tipos('CodigoCancelamento'), '1')
+        ], Id: id),
+        signature_placeholder(id)
+      ])
 
-      Nokogiri::XML::Builder.new do |xml|
-        xml.CancelarNfseEnvio(xmlns: NAMESPACE) do
-          xml.Pedido do
-            xml.InfPedidoCancelamento(Id: cancel_id) do
-              xml.IdentificacaoNfse do
-                xml.Numero invoice.numero_nfse
-                xml.CpfCnpj do
-                  xml.Cnpj org_cnpj_digits
-                end
-                xml.InscricaoMunicipal @establishment.inscricao_municipal
-                xml.CodigoMunicipio @establishment.municipio_ibge_code
-              end
-              xml.CodigoCancelamento '1'
-              xml.Signature(xmlns: 'http://www.w3.org/2000/09/xmldsig#') do
-                xml.SignedInfo do
-                  xml.CanonicalizationMethod(Algorithm: 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315')
-                  xml.SignatureMethod(Algorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1')
-                  xml.Reference(URI: "##{cancel_id}") do
-                    xml.Transforms do
-                      xml.Transform(Algorithm: 'http://www.w3.org/2000/09/xmldsig#enveloped-signature')
-                    end
-                    xml.DigestMethod(Algorithm: 'http://www.w3.org/2000/09/xmldsig#sha1')
-                    xml.DigestValue
-                  end
-                end
-                xml.SignatureValue
-                xml.KeyInfo do
-                  xml.X509Data do
-                    xml.X509Certificate x509_certificate_base64
-                  end
-                end
-              end
-            end
-          end
-        end
-      end.to_xml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XML | Nokogiri::XML::Node::SaveOptions::NO_DECLARATION)
+      xml_declaration + root_element('CancelarNfseEnvio', pedido)
     end
 
-    # O certificado já entra preenchido no XML (build_rps_xml/build_cancelamento_xml)
-    # ANTES de assinar — reabrir o XML já assinado com Nokogiri pra só then preencher
-    # o X509Certificate e serializar de novo com `to_s` parecia inofensivo (o
-    # certificado fica fora do que é hasheado, já que o transform
-    # enveloped-signature remove a tag <Signature> inteira antes de calcular o
-    # digest do nó referenciado), mas na prática QUEBRAVA a assinatura: o
-    # reparse+serialize do documento inteiro muda formatação (ex.: tags vazias
-    # como <Cnpj/> viram <Cnpj></Cnpj> ou vice-versa) o suficiente pra
-    # canonicalização do <SignedInfo>/nó referenciado não bater mais depois —
-    # confirmado com um teste real (self-signed cert): assinatura só validava
-    # quando o certificado já estava no XML antes de chamar `.sign`.
+    # Template de assinatura XMLDSig com os valores vazios — preenchidos por
+    # `sign` depois de parsear. `uri` vazia assina o documento inteiro (digest do
+    # elemento raiz); com Id, referencia o nó `[@Id]`.
+    def signature_placeholder(id)
+      uri = id.to_s.empty? ? '' : "##{id}"
+      '<Signature xmlns="' + DSIG_NS + '">' \
+        '<SignedInfo>' \
+          "<CanonicalizationMethod Algorithm=\"#{C14N}\"/>" \
+          "<SignatureMethod Algorithm=\"#{RSA_SHA1}\"/>" \
+          "<Reference URI=\"#{uri}\">" \
+            '<Transforms>' \
+              "<Transform Algorithm=\"#{ENVELOPED}\"/>" \
+              "<Transform Algorithm=\"#{C14N}\"/>" \
+            '</Transforms>' \
+            "<DigestMethod Algorithm=\"#{SHA1_NS}\"/>" \
+            '<DigestValue></DigestValue>' \
+          '</Reference>' \
+        '</SignedInfo>' \
+        '<SignatureValue></SignatureValue>' \
+        '<KeyInfo>' \
+          "<X509Data><X509Certificate>#{x509_certificate_base64}</X509Certificate></X509Data>" \
+        '</KeyInfo>' \
+      '</Signature>'
+    end
+
+    # Assinatura XMLDSig (RSA-SHA1) feita à mão. A gem xmldsig 0.7.0 exige que a
+    # <Signature> seja DESCENDENTE do nó referenciado pra aplicar o transform
+    # enveloped-signature, mas o schema ABRASF coloca a Signature como IRMÃ do
+    # nó assinado (InfDeclaracaoPrestacaoServico / LoteRps). Assinamos então
+    # todas as Signatures do documento: o digest cobre o nó referenciado
+    # (removendo a própria Signature quando ela está dentro dele, caso do
+    # `URI=""`), e o SignatureValue é o RSA-SHA1 sobre o SignedInfo
+    # canonicalizado.
     def sign(xml_string)
-      Xmldsig::SignedDocument.new(xml_string, id_attr: 'Id').sign(pkcs12.key)
+      doc = Nokogiri::XML(xml_string)
+      doc.xpath("//*[local-name()='Signature']").each { |signature| sign_one(doc, signature) }
+      doc.to_xml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XML)
+    end
+
+    def sign_one(doc, signature)
+      signed_info = signature.at_xpath("./*[local-name()='SignedInfo']")
+      reference = signed_info.at_xpath("./*[local-name()='Reference']")
+      id = reference.attribute('URI').to_s.sub(/\A#/, '')
+
+      digest =
+        if id.empty?
+          # Assinatura do documento inteiro: o enveloped-signature tira a própria
+          # Signature do digest. Ela é o último filho do root, então removê-la e
+          # reanexá-la preserva a ordem.
+          referenced = doc.root
+          parent = signature.parent
+          signature.unlink
+          value = OpenSSL::Digest::SHA1.digest(referenced.canonicalize)
+          parent.add_child(signature)
+          value
+        else
+          referenced = doc.at_xpath("//*[@Id='#{id}']")
+          raise Error, "nó referenciado ##{id} não encontrado no XML" if referenced.nil?
+
+          OpenSSL::Digest::SHA1.digest(referenced.canonicalize)
+        end
+
+      reference.at_xpath("./*[local-name()='DigestValue']").content = Base64.strict_encode64(digest)
+      signature_value = pkcs12.key.sign(OpenSSL::Digest.new('SHA1'), signed_info.canonicalize)
+      signature.at_xpath("./*[local-name()='SignatureValue']").content = Base64.strict_encode64(signature_value)
     end
 
     def x509_certificate_base64
       Base64.strict_encode64(pkcs12.certificate.to_der)
     end
 
-    def envelope_body(signed_xml)
-      { 'xml' => signed_xml }
+    # ------------------------------------------------------------------- SOAP
+
+    # Envelope SOAP 1.1 do padrão eicon: wrapper `<Operacao>Request` no namespace
+    # do serviço, com os dois parâmetros string (cabeçalho + dados) escapados e
+    # SEM namespace (o schema eicon os declara unqualified).
+    def soap_call(operation, dados_xml)
+      response = http_post(soap_envelope(operation, dados_xml), operation)
+      parse_soap_response(response)
     end
 
-    def consulta_situacao_body(invoice)
-      {
-        'xml' => Nokogiri::XML::Builder.new do |xml|
-          xml.ConsultarSituacaoLoteRpsEnvio(xmlns: NAMESPACE) do
-            xml.Prestador do
-              xml.CpfCnpj { xml.Cnpj org_cnpj_digits }
-              xml.InscricaoMunicipal @establishment.inscricao_municipal
-            end
-            xml.Protocolo invoice.protocolo
-          end
-        end.to_xml(save_with: Nokogiri::XML::Node::SaveOptions::AS_XML | Nokogiri::XML::Node::SaveOptions::NO_DECLARATION)
-      }
+    def soap_envelope(operation, dados_xml)
+      xml_declaration +
+        %(<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ws="#{SOAP_NS}">) +
+        '<soapenv:Header/><soapenv:Body>' +
+        "<ws:#{operation}Request>" \
+        "<nfseCabecMsg>#{escape_xml(cabecalho_xml)}</nfseCabecMsg>" \
+        "<nfseDadosMsg>#{escape_xml(dados_xml)}</nfseDadosMsg>" \
+        "</ws:#{operation}Request>" \
+        '</soapenv:Body></soapenv:Envelope>'
     end
 
-    # Funil único de leitura da resposta ABRASF — municípios ABRASF devolvem
-    # rejeição via <ListaMensagemRetorno><MensagemRetorno><Codigo/><Mensagem/>,
-    # e é essa mensagem real da prefeitura que precisa cair em
-    # erro_mensagem/xml_retorno pra ser útil de debugar depois.
-    def apply_emissao_response(invoice, response)
-      body = response.http.body
-      doc = Nokogiri::XML(body)
-      invoice.xml_retorno = body
+    def cabecalho_xml
+      %(<cabecalho xmlns="#{giss_ns('cabecalho')}" versao="#{DATA_VERSION}"><versaoDados>#{DATA_VERSION}</versaoDados></cabecalho>)
+    end
 
-      mensagem_erro = extract_mensagem_erro(doc)
-      if mensagem_erro
+    def http_post(body, operation)
+      uri = URI.parse(ENDPOINT)
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = true
+      http.cert = pkcs12.certificate
+      http.key = pkcs12.key
+      http.verify_mode = OpenSSL::SSL::VERIFY_PEER
+      http.open_timeout = 30
+      http.read_timeout = 90
+
+      request = Net::HTTP::Post.new(uri.request_uri)
+      request['Content-Type'] = 'text/xml;charset=UTF-8'
+      request['SOAPAction'] = %("#{SOAP_NS}/#{operation}")
+      request.body = body
+      http.request(request)
+    end
+
+    # Extrai o `outputXML` (a resposta de negócio de verdade) do envelope SOAP.
+    # O conteúdo vem escapado como texto dentro de <outputXML>, então precisa
+    # ser lido via .text e só então parseado como XML.
+    def parse_soap_response(response)
+      doc = Nokogiri::XML(response.body)
+      fault = doc.at_xpath("//*[local-name()='Fault']")
+      if fault
+        raise Error, "SOAP fault Guarulhos: #{fault.at_xpath(".//*[local-name()='faultstring']")&.text || response.body}"
+      end
+
+      output = doc.at_xpath("//*[local-name()='outputXML']")&.text
+      raise Error, "Resposta sem outputXML (HTTP #{response.code}): #{response.body.to_s[0, 500]}" if output.blank?
+
+      output
+    end
+
+    # -------------------------------------------------------------- respostas
+
+    # RecepcionarLoteRps: guarda o protocolo e deixa o RPS `processing`. A nota
+    # em si só aparece na ConsultarLoteRps (feita pelo PollStatusJob).
+    def apply_recepcao_response(invoice, output_xml)
+      doc = Nokogiri::XML(output_xml)
+      invoice.xml_retorno = output_xml
+
+      if (mensagem = extract_mensagem_erro(doc))
         invoice.status = 'error'
-        invoice.erro_mensagem = mensagem_erro
+        invoice.erro_mensagem = mensagem
       else
-        protocolo = doc.at_xpath('//xmlns:Protocolo', 'xmlns' => NAMESPACE)&.content
-        invoice.protocolo = protocolo
-        invoice.status = 'processing'
+        protocolo = doc.at_xpath("//*[local-name()='Protocolo']")&.text
+        if protocolo.present?
+          invoice.protocolo = protocolo
+          invoice.status = 'processing'
+          invoice.erro_mensagem = nil
+        else
+          invoice.status = 'error'
+          invoice.erro_mensagem = 'Resposta da prefeitura sem protocolo e sem mensagem de erro'
+        end
       end
       invoice.save!
       invoice
     end
 
-    def apply_situacao_response(invoice, response)
-      body = response.http.body
-      doc = Nokogiri::XML(body)
-      invoice.xml_retorno = body
+    def apply_situacao_response(invoice, output_xml)
+      doc = Nokogiri::XML(output_xml)
+      invoice.xml_retorno = output_xml
+      situacao = doc.at_xpath("//*[local-name()='Situacao']")&.text
 
-      mensagem_erro = extract_mensagem_erro(doc)
-      numero_nfse = doc.at_xpath('//xmlns:Numero', 'xmlns' => NAMESPACE)&.content
-      codigo_verificacao = doc.at_xpath('//xmlns:CodigoVerificacao', 'xmlns' => NAMESPACE)&.content
-
-      if mensagem_erro
+      case situacao
+      when '4'
+        inf = doc.at_xpath("//*[local-name()='InfNfse']")
+        numero = inf&.at_xpath("./*[local-name()='Numero']")&.text
+        codigo = inf&.at_xpath("./*[local-name()='CodigoVerificacao']")&.text
+        if numero.present?
+          invoice.numero_nfse = numero
+          invoice.codigo_verificacao = codigo
+          invoice.status = 'authorized'
+          invoice.erro_mensagem = nil
+        else
+          invoice.status = 'error'
+          invoice.erro_mensagem = extract_mensagem_erro(doc) || 'Lote processado sem NFS-e na resposta'
+        end
+      when '3'
         invoice.status = 'error'
-        invoice.erro_mensagem = mensagem_erro
-      elsif numero_nfse.present?
-        invoice.numero_nfse = numero_nfse
-        invoice.codigo_verificacao = codigo_verificacao
-        invoice.status = 'authorized'
+        invoice.erro_mensagem = extract_mensagem_erro(doc) || 'Lote processado com erro pela prefeitura'
+      when '1', '2'
+        # Não recebido / não processado: a resposta traz só um aviso
+        # ("Remessa ainda não foi processada"), não é erro. Segue processando.
+        invoice.status = 'processing'
+        invoice.erro_mensagem = nil
+      else
+        if (mensagem = extract_mensagem_erro(doc))
+          invoice.status = 'error'
+          invoice.erro_mensagem = mensagem
+        end
       end
       invoice.save!
       invoice
     end
 
-    def apply_cancelamento_response(invoice, response)
-      body = response.http.body
-      doc = Nokogiri::XML(body)
-      invoice.xml_retorno = body
+    def apply_cancelamento_response(invoice, output_xml)
+      doc = Nokogiri::XML(output_xml)
+      invoice.xml_retorno = output_xml
 
-      mensagem_erro = extract_mensagem_erro(doc)
-      if mensagem_erro
-        invoice.erro_mensagem = mensagem_erro
+      if (mensagem = extract_mensagem_erro(doc))
+        invoice.erro_mensagem = mensagem
       else
         invoice.status = 'cancelled'
       end
@@ -294,20 +559,15 @@ module Guarulhos
     end
 
     def extract_mensagem_erro(doc)
-      mensagem = doc.at_xpath('//xmlns:MensagemRetorno/xmlns:Mensagem', 'xmlns' => NAMESPACE)&.content
-      codigo = doc.at_xpath('//xmlns:MensagemRetorno/xmlns:Codigo', 'xmlns' => NAMESPACE)&.content
-      return nil if mensagem.blank?
+      node = doc.at_xpath("//*[local-name()='MensagemRetorno' or local-name()='MensagemRetornoLote']")
+      return nil if node.nil?
 
-      codigo.present? ? "[#{codigo}] #{mensagem}" : mensagem
-    end
+      codigo = node.at_xpath("./*[local-name()='Codigo']")&.text
+      mensagem = node.at_xpath("./*[local-name()='Mensagem']")&.text
+      correcao = node.at_xpath("./*[local-name()='Correcao']")&.text
+      return nil if mensagem.blank? && codigo.blank?
 
-    def cpf_cnpj_node(xml, doc)
-      digits = doc.to_s.gsub(/\D/, '')
-      digits.length > 11 ? xml.Cnpj(digits) : xml.Cpf(digits)
-    end
-
-    def org_cnpj_digits
-      GlobalConfigService.load('ORG_CNPJ', '').to_s.gsub(/\D/, '')
+      [codigo.present? ? "[#{codigo}]" : nil, mensagem, correcao].compact.reject(&:blank?).join(' ')
     end
   end
 end

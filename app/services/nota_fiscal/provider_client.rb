@@ -5,6 +5,11 @@
 # guard-rail (`NotImplementedError`) caso um client novo esqueça um método.
 module NotaFiscal
   class ProviderClient
+    # Erro de integração com o webservice municipal (transporte, SOAP fault,
+    # resposta fora do esperado). Cada client especializa com a própria
+    # mensagem; o controller resgata por esta classe base.
+    class Error < StandardError; end
+
     def initialize(fiscal_establishment)
       @establishment = fiscal_establishment
     end
