@@ -76,7 +76,7 @@ module Meta
         message = conversation.messages.new(
           inbox_id: conversation.inbox_id,
           message_type: :outgoing,
-          content: build_template
+          content: template
         )
         image_url = creative_image_url
         AgentBots::RemoteMediaAttacher.build_attachments(message, [{ url: image_url, file_type: 'image' }]) if image_url.present?
@@ -136,8 +136,24 @@ module Meta
         lines << ''
         lines << "*Formulário:* #{form_label}"
         lines << "*Data:* #{formatted_date}"
-        lines << "*Campanha:* #{@submission.campaign_name}" if @submission.campaign_name.present?
-        lines << "*Anúncio:* #{@submission.ad_name}" if @submission.ad_name.present?
+        push_entity_line(lines, 'Campanha', @submission.campaign_name, @submission.campaign_id)
+        push_entity_line(lines, 'Conjunto', @submission.adset_name, @submission.adset_id)
+        push_entity_line(lines, 'Anúncio', @submission.ad_name, @submission.ad_id)
+
+        criativo = creative_lines
+        unless criativo.empty?
+          lines << ''
+          lines << '*Criativo:*'
+          lines.concat(criativo)
+        end
+
+        alvo = targeting_lines
+        unless alvo.empty?
+          lines << ''
+          lines << '*Direcionamento do anúncio:*'
+          lines.concat(alvo)
+        end
+
         lines << ''
         lines << '*Respostas:*'
         Array(@submission.field_data).each do |f|
@@ -146,6 +162,97 @@ module Meta
           lines << "• #{name}: #{value}" if value.present?
         end
         lines.join("\n")
+      end
+
+      # Nome + ID entre parênteses — o ID é o que permite achar o item no
+      # Gerenciador de Anúncios quando o nome é genérico ("Novo anúncio").
+      def push_entity_line(lines, label, name, id)
+        return if name.blank? && id.blank?
+
+        texto = name.presence || id
+        texto = "#{texto} (#{id})" if name.present? && id.present? && id.to_s != name.to_s
+        lines << "*#{label}:* #{texto}"
+      end
+
+      # Texto principal/título/descrição do anúncio que gerou o lead — vem da
+      # mesma leitura de criativo já usada pra anexar a imagem (nada aqui
+      # pode quebrar a notificação: sem criativo, a mensagem vai sem bloco).
+      def creative_lines
+        detalhes = creative_details
+        return [] if detalhes.blank?
+
+        lines = []
+        lines << "• Texto principal: #{detalhes['texto_principal']}" if detalhes['texto_principal'].present?
+        lines << "• Título: #{detalhes['titulo']}" if detalhes['titulo'].present?
+        lines << "• Descrição: #{detalhes['descricao']}" if detalhes['descricao'].present?
+        lines
+      end
+
+      def targeting_lines
+        alvo = targeting_summary
+        return [] if alvo.blank?
+
+        lines = []
+        lines << info_line('Orçamento', alvo[:orcamento])
+        lines << info_line('Idade', idade_label(alvo))
+        lines << info_line('Gênero', alvo[:generos])
+        lines << info_line('Local', list_label(alvo[:localizacoes]))
+        lines << info_line('Público salvo', list_label(alvo[:publicos_salvos]))
+        lines << info_line('Público personalizado', list_label(alvo[:publicos_personalizados]))
+        lines << info_line('Público semelhante', list_label(alvo[:publicos_semelhantes]))
+        lines << info_line('Direcionamento', list_label(alvo[:direcionamento]))
+        lines << info_line('Posicionamento', list_label(alvo[:posicionamento]))
+        lines << info_line('Dispositivo', list_label(alvo[:dispositivos]))
+        lines.compact
+      end
+
+      def info_line(label, value)
+        return nil if value.blank?
+
+        "• #{label}: #{value}"
+      end
+
+      def idade_label(alvo)
+        return nil unless alvo[:idade_min].present? || alvo[:idade_max].present?
+
+        "#{alvo[:idade_min] || '—'}-#{alvo[:idade_max] || '—'} anos"
+      end
+
+      def list_label(values)
+        Array(values).reject(&:blank?).presence&.join(' · ')
+      end
+
+      def template
+        @template ||= build_template
+      end
+
+      # 2 chamadas Graph no máximo (criativo + conjunto), cacheadas: cada
+      # destino da lista recebe a mesma mensagem sem repetir consulta.
+      def creative_details
+        return nil if @submission.ad_id.blank?
+
+        @creative_details ||= begin
+          result = ads_service.creative_details(ad_id: @submission.ad_id)
+          result.success ? result.data.first : nil
+        rescue StandardError => e
+          Rails.logger.error("Meta::LeadAds::WhatsappNotifierService creative_details: #{e.message}")
+          nil
+        end
+      end
+
+      def targeting_summary
+        return nil if @submission.adset_id.blank?
+
+        @targeting_summary ||= begin
+          ads_service.adset_targeting_summary(@submission.adset_id)
+        rescue StandardError => e
+          Rails.logger.error("Meta::LeadAds::WhatsappNotifierService targeting_summary: #{e.message}")
+          nil
+        end
+      end
+
+      def ads_service
+        @ads_service ||= Meta::AdsManagerService.new
       end
 
       def form_label
@@ -162,12 +269,10 @@ module Meta
       # ad_id (lead veio de um teste/preview, por exemplo) simplesmente não
       # anexa imagem, não é erro.
       def creative_image_url
-        return nil if @submission.ad_id.blank?
+        detalhes = creative_details
+        return nil if detalhes.blank?
 
-        result = Meta::AdsManagerService.new.creative_details(ad_id: @submission.ad_id)
-        return nil unless result.success
-
-        result.data.first&.dig('imagem') || result.data.first&.dig('thumbnail_url')
+        detalhes['imagem'].presence || detalhes['thumbnail_url'].presence
       end
     end
   end

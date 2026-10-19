@@ -29,6 +29,68 @@ class Meta::AdsManagerService
     'ad' => %w[name status ad_creative]
   }.freeze
 
+  # Formatação de orçamento do resumo de lead: a Graph devolve centavos na
+  # moeda da conta (campo `currency`, lido por instância em #currency_for).
+  CURRENCY_SYMBOLS = {
+    'BRL' => 'R$ ', 'USD' => 'US$ ', 'EUR' => '€ ', 'GBP' => '£ ',
+    'ARS' => '$ ', 'CLP' => '$ ', 'COP' => '$ ', 'MXN' => 'MX$ ',
+    'PEN' => 'S/ ', 'UYU' => '$U ', 'PYG' => '₲ ', 'BOB' => 'Bs '
+  }.freeze
+
+  # geo_locations.countries vem como código ISO — sem o mapa, um conjunto
+  # mirando só o país aparecia pro usuário como "BR".
+  COUNTRY_NAMES = {
+    'BR' => 'Brasil', 'AR' => 'Argentina', 'CL' => 'Chile', 'CO' => 'Colômbia',
+    'MX' => 'México', 'PE' => 'Peru', 'BO' => 'Bolívia', 'PY' => 'Paraguai',
+    'UY' => 'Uruguai', 'VE' => 'Venezuela', 'EC' => 'Equador', 'GY' => 'Guiana',
+    'SR' => 'Suriname', 'PT' => 'Portugal', 'ES' => 'Espanha', 'FR' => 'França',
+    'IT' => 'Itália', 'US' => 'Estados Unidos', 'CA' => 'Canadá', 'GB' => 'Reino Unido',
+    'JP' => 'Japão', 'DO' => 'República Dominicana'
+  }.freeze
+
+  PLACEMENT_PLATFORM_LABELS = {
+    'facebook' => 'Facebook', 'instagram' => 'Instagram', 'messenger' => 'Messenger',
+    'whatsapp' => 'WhatsApp', 'audience_network' => 'Audience Network'
+  }.freeze
+
+  DEVICE_LABELS = { 'mobile' => 'Celular', 'desktop' => 'Desktop', 'tablet' => 'Tablet' }.freeze
+
+  # Posições vêm em inglês cru da Graph API; o que não estiver no mapa cai
+  # pro nome original com underscores trocados por espaço.
+  PLACEMENT_POSITION_LABELS = {
+    'feed' => 'Feed', 'stream' => 'Feed', 'story' => 'Stories', 'stories' => 'Stories',
+    'reels' => 'Reels', 'facebook_reels' => 'Reels', 'facebook_reels_overlay' => 'Reels (overlay)',
+    'explore' => 'Explorar', 'explore_home' => 'Explorar', 'ig_search' => 'Busca do Instagram',
+    'search' => 'Busca', 'marketplace' => 'Marketplace', 'instream_video' => 'Vídeo in-stream',
+    'video_feeds' => 'Feed de vídeos', 'profile_feed' => 'Feed do perfil',
+    'profile_recommendation' => 'Recomendação de perfil', 'notification' => 'Notificações',
+    'groups_feed' => 'Grupos', 'igtv' => 'IGTV', 'instant_article' => 'Instant Article',
+    'right_hand_column' => 'Coluna lateral', 'messenger_home' => 'Home do Messenger',
+    'sponsored' => 'Patrocinado', 'whatsapp_status' => 'Status do WhatsApp',
+    'status' => 'Status', 'audience_network' => 'Audience Network', 'native' => 'Nativo',
+    'banner' => 'Banner', 'interstitial' => 'Interstitial', 'rewarded_video' => 'Vídeo recompensado'
+  }.freeze
+
+  TARGETING_DETAIL_LABELS = {
+    'interests' => 'Interesses', 'behaviors' => 'Comportamentos', 'demographics' => 'Demografia',
+    'connections' => 'Conexões', 'friends_of_connections' => 'Amigos de conexões',
+    'work_employers' => 'Empregadores', 'work_positions' => 'Cargos',
+    'education_statuses' => 'Formação acadêmica', 'college_years' => 'Ano de formação',
+    'education_majors' => 'Área de estudo',
+    'income' => 'Faixa de renda', 'home_ownership' => 'Moradia', 'home_type' => 'Tipo de moradia',
+    'family_statuses' => 'Situação familiar', 'relationship_interests' => 'Interesses de relacionamento',
+    'life_events' => 'Eventos de vida', 'political_views' => 'Visão política',
+    'app_installation_status' => 'Instalação de app', 'app_actions' => 'Ações no app'
+  }.freeze
+
+  # Chaves do targeting que identificam um público salvo (as demais —
+  # publisher_platforms, targeting_automation, device_platforms — são
+  # defaults preenchidos pela Meta no conjunto e não fazem parte da definição
+  # do público).
+  COMPARABLE_TARGETING_KEYS = %w[
+    age_min age_max genders geo_locations flexible_spec exclusions locales
+  ].freeze
+
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 
   def initialize(access_token: nil)
@@ -393,6 +455,7 @@ class Meta::AdsManagerService
       'carrossel' => carousel,
       'titulo' => creative['title'],
       'texto_principal' => creative['body'],
+      'descricao' => creative_description(link_data, video_data),
       'criativo_nome' => creative['name']
     }])
   end
@@ -1113,6 +1176,9 @@ class Meta::AdsManagerService
       lead['criativo_imagem'] = creative[:imagem]
       lead['criativo_video'] = creative[:video]
       lead['criativo_link'] = creative[:link]
+      lead['criativo_texto_principal'] = creative[:texto_principal]
+      lead['criativo_titulo'] = creative[:titulo]
+      lead['criativo_descricao'] = creative[:descricao]
     end
   end
 
@@ -1142,11 +1208,12 @@ class Meta::AdsManagerService
   end
 
   def adset_targeting_summary(adset_id)
-    result = get("/#{adset_id}", fields: 'targeting')
+    result = get("/#{adset_id}", fields: 'name,targeting,daily_budget,lifetime_budget,campaign_id,account_id')
     return nil unless result.success
 
     targeting = result.data['targeting'] || {}
     genders = Array(targeting['genders'])
+    audiences = targeting_audiences(targeting, result.data['account_id'])
     {
       idade_min: targeting['age_min'],
       idade_max: targeting['age_max'],
@@ -1154,12 +1221,289 @@ class Meta::AdsManagerService
       # UI do Gerenciador de Anúncios -- replica a mesma leitura aqui.
       generos: genders.empty? ? 'Todos' : genders.map { |g| g == 1 ? 'Homens' : 'Mulheres' }.join(', '),
       plataformas: Array(targeting['publisher_platforms']),
-      dispositivos: Array(targeting['device_platforms']),
-      localizacoes: targeting.dig('geo_locations', 'cities')&.map { |c| c['name'] } || []
+      dispositivos: device_labels(targeting),
+      localizacoes: targeting_locations(targeting),
+      posicionamento: targeting_placements(targeting),
+      direcionamento: targeting_details(targeting, audiences[:excluidos]),
+      orcamento: adset_budget_summary(result.data),
+      publicos_salvos: audiences[:salvos],
+      publicos_personalizados: audiences[:personalizados],
+      publicos_semelhantes: audiences[:semelhantes]
     }
   rescue StandardError => e
     Rails.logger.error "Meta::AdsManagerService#adset_targeting_summary(#{adset_id}): #{e.message}"
     nil
+  end
+
+  # --- leitura do targeting de um conjunto, em texto pro lead ---
+  # Tudo abaixo é best-effort: se a Graph API recusar um field ou uma conta
+  # não tiver público salvo, a linha simplesmente não aparece — nunca é
+  # erro, porque o resumo do lead não pode ficar refém de um field opcional.
+
+  # geo_locations vem em vários formatos (cities, regions, countries, zips e
+  # custom_locations com pin no mapa). A versão antiga lia só `cities`, então
+  # conjunto mirando estado, país ou pino aparecia "sem local".
+  def targeting_locations(targeting)
+    geo = targeting['geo_locations'] || {}
+    locs = []
+    Array(geo['cities']).each { |c| locs << place_with_radius(c['name'], c['distance'] || c['radius'], c['distance_unit']) }
+    Array(geo['regions']).each { |r| locs << r['name'] }
+    Array(geo['countries']).each { |code| locs << (COUNTRY_NAMES[code] || code) }
+    Array(geo['zips']).each { |z| locs << z['primary_zip'] || z['zip'] }
+    # `places` = ponto de interesse com raio (shopping, avenida, hospital) —
+    # formato do conjunto "Aberto adv+ - Raio de 5km".
+    Array(geo['places']).each { |p| locs << place_with_radius(p['name'], p['radius'], p['distance_unit']) }
+    Array(geo['custom_locations']).each do |l|
+      locs << place_with_radius(l['name'].presence || l['address_string'], l['radius'], l['distance_unit'])
+    end
+    locs.reject(&:blank?).uniq
+  end
+
+  def place_with_radius(name, radius, unit = nil)
+    return nil if name.blank?
+    return name if radius.blank? || radius.to_i.zero?
+
+    "#{name} (até #{radius} #{unit == 'mile' ? 'mi' : 'km'})"
+  end
+
+  # device_platforms ausente = sem restrição (a Meta serve desktop e
+  # celular) — mesma leitura já usada pra `genders` vazio => "Todos".
+  def device_labels(targeting)
+    devices = Array(targeting['device_platforms'])
+    return ['Todos'] if devices.empty?
+
+    devices.map { |device| DEVICE_LABELS[device] || device.to_s.tr('_', ' ').capitalize }
+  end
+
+  # Posicionamento por plataforma: `publisher_platforms` diz ONDE roda
+  # (Facebook/Instagram/Messenger/WhatsApp/Audience Network) e as chaves
+  # `*_positions` dizem EM QUAL espaço de cada uma (feed, stories, reels,
+  # marketplace, buscas, status...). É o dado que o usuário chamou de "3º de
+  # posicionamento" — a plataforma não mostra o mesmo conjunto de posições.
+  def targeting_placements(targeting)
+    Array(targeting['publisher_platforms']).map do |platform|
+      label = PLACEMENT_PLATFORM_LABELS[platform] || platform.to_s.tr('_', ' ').capitalize
+      positions = Array(targeting["#{platform}_positions"])
+      next label if positions.empty?
+
+      traducoes = positions.map { |p| PLACEMENT_POSITION_LABELS[p] || p.to_s.tr('_', ' ') }
+      "#{label}: #{traducoes.join(', ')}"
+    end
+  end
+
+  # Direcionamento detalhado: blocos do flexible_spec (interesses,
+  # comportamentos, demografia, conexões) + o que foi excluído + sinal de
+  # audiência expandida/Advantage+. Públicos entram por fora (chamada
+  # separada), porque exigem lookup de nome.
+  def targeting_details(targeting, excluded_audiences = [])
+    linhas = []
+
+    Array(targeting['flexible_spec']).each do |block|
+      next unless block.is_a?(Hash)
+
+      block.each do |kind, values|
+        next if audience_kind?(kind)
+
+        names = audience_names_in(values)
+        next if names.empty?
+
+        linhas << "#{targeting_detail_label(kind)}: #{names.join(', ')}"
+      end
+    end
+
+    exclusions = targeting['exclusions'] || {}
+    exclusions.each do |kind, values|
+      if audience_kind?(kind)
+        # ids — os nomes já vêm resolvidos de targeting_audiences.
+        next
+      end
+
+      names = audience_names_in(values)
+      next if names.empty?
+
+      linhas << "Exclui #{targeting_detail_label(kind).downcase}: #{names.join(', ')}"
+    end
+    linhas << "Exclui públicos: #{excluded_audiences.join(', ')}" if excluded_audiences.any?
+
+    if targeting.dig('targeting_automation', 'advantage_audience').to_i == 1
+      linhas << 'Advantage+ Audience (a Meta escolhe o público)'
+    elsif targeting['targeting_optimization'].to_s == 'expansion_all'
+      linhas << 'Expansão de audiência ativa'
+    end
+
+    linhas
+  end
+
+  def audience_kind?(key)
+    key.to_s.end_with?('audience', 'audiences')
+  end
+
+  def audience_names_in(values)
+    Array(values).filter_map { |v| v.is_a?(Hash) ? v['name'] : nil }.reject(&:blank?)
+  end
+
+  def targeting_detail_label(kind)
+    TARGETING_DETAIL_LABELS[kind.to_s] || kind.to_s.tr('_', ' ').capitalize
+  end
+
+  # Públicos citados no direcionamento. Os ids aparecem no raiz do targeting,
+  # dentro de blocos do flexible_spec e em exclusions — a mesma chave
+  # `custom_audiences` segura salvo (SAVED), personalizado (web/app/lista...)
+  # e semelhante (LOOKALIKE), então o tipo sai do `subtype` do próprio nó.
+  # Quando o conjunto foi criado a partir de um "Público salvo", a Meta
+  # expande o spec dentro do targeting e some com a referência: nesse caso o
+  # nome sai do casamento do spec com a lista de públicos salvos da conta.
+  def targeting_audiences(targeting, account_id)
+    resultado = { salvos: [], personalizados: [], semelhantes: [], excluidos: [] }
+
+    audience_ids_in(targeting).each do |id|
+      publico = resolve_audience_label(id)
+      next unless publico
+
+      case publico[:subtype]
+      when 'LOOKALIKE' then resultado[:semelhantes] << publico[:nome]
+      when 'SAVED' then resultado[:salvos] << publico[:nome]
+      else resultado[:personalizados] << publico[:nome]
+      end
+    end
+
+    audience_ids_in(targeting['exclusions'], false).each do |id|
+      publico = resolve_audience_label(id)
+      resultado[:excluidos] << publico[:nome] if publico
+    end
+
+    if resultado[:salvos].empty?
+      nome = matching_saved_audience_name(targeting, account_id)
+      resultado[:salvos] << nome if nome.present?
+    end
+
+    resultado.each_value(&:uniq!)
+    resultado
+  rescue StandardError => e
+    Rails.logger.error "Meta::AdsManagerService#targeting_audiences: #{e.message}"
+    { salvos: [], personalizados: [], semelhantes: [], excluidos: [] }
+  end
+
+  def audience_ids_in(node, skip_exclusions = true)
+    case node
+    when Hash
+      ids = []
+      node.each do |key, value|
+        next if skip_exclusions && key == 'exclusions'
+        next unless value.is_a?(Hash) || value.is_a?(Array)
+
+        if audience_kind?(key)
+          ids.concat(arrayify(value).map { |v| v.is_a?(Hash) ? v['id'] : v }.compact)
+        else
+          ids.concat(audience_ids_in(value, skip_exclusions))
+        end
+      end
+      ids.uniq
+    when Array
+      node.flat_map { |v| audience_ids_in(v, skip_exclusions) }.uniq
+    else
+      []
+    end
+  end
+
+  def arrayify(value)
+    value.is_a?(Array) ? value : [value]
+  end
+
+  # Nome + tipo do público (1 chamada por id, cacheada na instância — o
+  # resumo de leads pede isso uma vez por conjunto, não por lead).
+  def resolve_audience_label(audience_id)
+    return nil if audience_id.blank?
+
+    cache = (@audience_label_cache ||= {})
+    return cache[audience_id] if cache.key?(audience_id)
+
+    result = get("/#{audience_id}", fields: 'id,name,subtype')
+    cache[audience_id] = if result.success && result.data['name'].present?
+                           { nome: result.data['name'], subtype: result.data['subtype'].to_s.upcase }
+                         end
+  rescue StandardError
+    cache[audience_id] = nil
+    nil
+  end
+
+  def matching_saved_audience_name(targeting, account_id)
+    return nil if account_id.blank?
+
+    cache = (@saved_audiences_cache ||= {})
+    cache[account_id] ||= begin
+      result = saved_audiences(ad_account_id: account_id)
+      result.success ? Array(result.data) : []
+    end
+
+    alvo = adset_comparable_targeting(targeting)
+    return nil if alvo.empty?
+
+    match = cache[account_id].find do |publico|
+      definicao = publico['targeting'].is_a?(Hash) ? publico['targeting'] : {}
+      comparados = definicao.keys.select { |key| COMPARABLE_TARGETING_KEYS.include?(key) }
+      next false if comparados.empty?
+
+      comparados.all? { |key| definicao[key] == alvo[key] }
+    end
+    match&.dig('name')
+  rescue StandardError
+    nil
+  end
+
+  # Só o núcleo do direcionamento define a identidade de um público salvo —
+  # publisher_platforms/device_platforms/targeting_automation são defaults
+  # que a Meta preenche sozinha no conjunto e quebrariam o casamento.
+  def adset_comparable_targeting(targeting)
+    COMPARABLE_TARGETING_KEYS.each_with_object({}) do |key, memo|
+      memo[key] = targeting[key] if targeting.key?(key)
+    end
+  end
+
+  # Orçamento: conjunto sem daily/lifetime próprio significa CBO (orçamento
+  # na campanha) — nesse caso lê da campanha, senão o anúncio pareceria "sem
+  # orçamento" pra todo lead de conta com orçamento de campanha. Valores
+  # vêm em centavos na moeda da conta.
+  def adset_budget_summary(adset)
+    value, period = budget_value_and_period(adset['daily_budget'], adset['lifetime_budget'])
+    origem_campanha = value.nil?
+
+    if value.nil? && adset['campaign_id'].present?
+      campaign = get("/#{adset['campaign_id']}", fields: 'daily_budget,lifetime_budget')
+      if campaign.success
+        value, period = budget_value_and_period(campaign.data['daily_budget'], campaign.data['lifetime_budget'])
+      end
+    end
+
+    return nil if value.nil?
+
+    texto = "#{format_money(value, adset['account_id'])}#{period}"
+    origem_campanha ? "#{texto} (orçamento da campanha)" : texto
+  rescue StandardError => e
+    Rails.logger.error "Meta::AdsManagerService#adset_budget_summary(#{adset['id']}): #{e.message}"
+    nil
+  end
+
+  def budget_value_and_period(daily, lifetime)
+    return [daily.to_i, '/dia'] if daily.present? && daily.to_i.positive?
+    return [lifetime.to_i, ' no total'] if lifetime.present? && lifetime.to_i.positive?
+
+    [nil, nil]
+  end
+
+  def format_money(minor_units, account_id)
+    symbol = CURRENCY_SYMBOLS[currency_for(account_id)] || "#{currency_for(account_id)} "
+    ActiveSupport::NumberHelper.number_to_currency(minor_units / 100.0, unit: symbol, separator: ',', delimiter: '.')
+  end
+
+  def currency_for(account_id)
+    return 'BRL' if account_id.blank?
+
+    cache = (@currency_cache ||= {})
+    cache[account_id] ||= begin
+      result = get("/act_#{account_id.to_s.delete_prefix('act_')}", fields: 'currency')
+      result.success && result.data['currency'].present? ? result.data['currency'] : 'BRL'
+    end
   end
 
   # `effective_object_story_id` vem como "<page_id>_<post_id>" — formato
@@ -1175,7 +1519,7 @@ class Meta::AdsManagerService
   # mesmo esse sendo válido sozinho. O permalink (link do post) é cosmético;
   # nome/imagem do criativo não podem ficar reféns dele.
   def ad_creative_summary(ad_id)
-    ad = get("/#{ad_id}", fields: 'creative{name,title,image_url,thumbnail_url,video_id,object_story_spec}')
+    ad = get("/#{ad_id}", fields: 'creative{name,title,body,image_url,thumbnail_url,video_id,object_story_spec}')
     return {} unless ad.success
 
     creative = ad.data['creative'] || {}
@@ -1192,11 +1536,23 @@ class Meta::AdsManagerService
       nome: creative['name'] || creative['title'],
       imagem: creative['image_url'] || link_data['picture'] || creative['thumbnail_url'] || video_data['image_url'],
       video: video_url,
-      link: ad_permalink(ad_id)
+      link: ad_permalink(ad_id),
+      texto_principal: creative['body'].presence,
+      titulo: creative['title'].presence,
+      descricao: creative_description(link_data, video_data)
     }
   rescue StandardError => e
     Rails.logger.error "Meta::AdsManagerService#ad_creative_summary(#{ad_id}): #{e.message}"
     {}
+  end
+
+  # "Descrição" do anúncio: nos formatos de link vem de link_data
+  # (description/caption) e nos de vídeo de video_data. Não existe como campo
+  # achatado no creative — `creative{description}` responde 400 (#100) e
+  # derrubaria nome/imagem junto.
+  def creative_description(link_data, video_data)
+    (link_data['description'] || link_data['caption'] ||
+      video_data['description'] || video_data['link_description']).presence
   end
 
   # Best-effort: nem todo anúncio tem effective_object_story_id (ver
