@@ -230,7 +230,7 @@ module Meta
         Array(@submission.field_data).each do |f|
           name = f['name'].to_s.tr('_', ' ').capitalize
           value = Array(f['values']).first
-          linhas << "• #{name}: #{value}" if value.present?
+          linhas << "• *#{name}*: #{value}" if value.present?
         end
         # Seção ligada mas sem nenhuma resposta, não deixa o título solto.
         linhas.length > 2 ? linhas : []
@@ -339,7 +339,7 @@ module Meta
       def info_line(label, value)
         return nil if value.blank?
 
-        "• #{label}: #{value}"
+        "• *#{label}*: #{value}"
       end
 
       def idade_label(alvo)
