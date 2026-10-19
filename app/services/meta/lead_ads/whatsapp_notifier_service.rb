@@ -185,7 +185,8 @@ module Meta
       end
 
       # Ordem pedida pelo usuário: Data, Formulário, Respostas, depois Campanha
-      # (e o resto — Criativo, Direcionamento).
+      # e Direcionamento; o Criativo (texto principal/título/descrição) vai por
+      # último.
       def build_template
         lines = []
         lines << '🔔 *Novo lead — Meta Ads*'
@@ -206,18 +207,18 @@ module Meta
           end
         end
 
-        criativo = creative_lines
-        unless criativo.empty?
-          lines << ''
-          lines << '*Criativo:*'
-          lines.concat(criativo)
-        end
-
         alvo = targeting_lines
         unless alvo.empty?
           lines << ''
           lines << '*Direcionamento do anúncio:*'
           lines.concat(alvo)
+        end
+
+        criativo = creative_lines
+        unless criativo.empty?
+          lines << ''
+          lines << '*Criativo:*'
+          lines.concat(criativo)
         end
 
         lines.join("\n")
