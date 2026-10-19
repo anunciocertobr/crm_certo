@@ -1079,6 +1079,22 @@ class Meta::AdsManagerService
     )
   end
 
+  # Nome do formulário direto na Graph — usado pelo cabeçalho da notificação
+  # quando o form não tem configuração própria nem form mapeado no CRM (sem
+  # isso o cabeçalho saía com o ID cru tipo "1123874697207918").
+  def leadgen_form_name(page_id:, form_id:)
+    token = resolve_page_token(page_id)
+    return nil unless token.success
+
+    result = get("/#{form_id}", { fields: 'name' }, token.data)
+    return nil unless result.success
+
+    result.data['name']
+  rescue StandardError => e
+    Rails.logger.error "Meta::AdsManagerService#leadgen_form_name(#{form_id}): #{e.message}"
+    nil
+  end
+
   # Todos os leads já recebidos por um formulário, direto na Graph API — ao
   # contrário de MetaLeadSubmission (que só guarda o que passou pelo webhook
   # `leadgen` a partir de hoje), isso cobre o histórico inteiro, inclusive

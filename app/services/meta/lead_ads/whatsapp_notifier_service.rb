@@ -352,7 +352,24 @@ module Meta
       end
 
       def form_label
-        setting&.form_name.presence || @submission.meta_lead_form&.form_name.presence || @submission.form_id
+        nome = setting&.form_name.presence || @submission.meta_lead_form&.form_name.presence
+        return nome if nome
+
+        # Sem configuração própria e sem form mapeado no CRM, busca o nome
+        # direto na Graph — sem isso o cabeçalho saía com o ID cru do
+        # formulário, que não diz nada pra quem lê a notificação.
+        (leadgen_form_name_from_graph.presence || @submission.form_id).to_s
+      end
+
+      def leadgen_form_name_from_graph
+        return @leadgen_form_name_from_graph if defined?(@leadgen_form_name_from_graph)
+
+        @leadgen_form_name_from_graph = begin
+          ads_service.leadgen_form_name(page_id: @submission.page_id, form_id: @submission.form_id)
+        rescue StandardError => e
+          Rails.logger.error("Meta::LeadAds::WhatsappNotifierService form_name: #{e.message}")
+          nil
+        end
       end
 
       def formatted_date
