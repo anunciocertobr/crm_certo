@@ -18,4 +18,13 @@ class MetaLeadNotificationSetting < ApplicationRecord
 
     [{ 'inbox_id' => inbox_id, 'whatsapp_number' => whatsapp_number }]
   end
+
+  # Seções marcadas pra ir na notificação (checkboxes no front). nil = nunca
+  # configurado → envia tudo (ver WhatsappNotifierService); array explícito
+  # (inclusive vazio) = exatamente o que foi escolhido.
+  def effective_content_sections
+    return nil if content_sections.nil?
+
+    Array(content_sections).map(&:to_s)
+  end
 end

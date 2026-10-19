@@ -14,10 +14,32 @@
 #   3. Nenhum dos dois configurado/habilitado -> não notifica (not_configured).
 # MetaLeadNotificationSetting com enabled=false é opt-out explícito: não cai
 # pro padrão da conta, mesmo que ele exista.
+#
+# O QUE vai na mensagem (seções) é escolhido por checkboxes no front: a
+# preferência do formulário (MetaLeadNotificationSetting#content_sections)
+# vence o padrão da conta (config 'meta_leads_notify' ->
+# META_LEADS_NOTIFY_CONTENT); sem nenhuma, envia todas (CONTENT_SECTIONS).
 module Meta
   module LeadAds
     class WhatsappNotifierService
       Result = Struct.new(:success, :error, keyword_init: true)
+
+      # Seções que podem ser ligadas/desligadas por formulário (checkboxes no
+      # front, coluna MetaLeadNotificationSetting#content_sections) ou no padrão
+      # da conta (config 'meta_leads_notify' -> META_LEADS_NOTIFY_CONTENT).
+      # Cabeçalho (formulário/data) é sempre enviado, não é seção. nil = todas.
+      CONTENT_SECTIONS = %w[
+        entities
+        creative_image creative_text creative_title creative_description
+        budget age_gender location audiences audience_detail
+        platforms placements devices
+        answers
+      ].freeze
+
+      # Subconjunto de CONTENT_SECTIONS que pertence ao bloco "Direcionamento do
+      # anúncio" — usado só pra evitar a chamada Graph de targeting quando
+      # nenhuma dessas seções está marcada.
+      TARGETING_SECTIONS = %w[budget age_gender location audiences audience_detail platforms placements devices].freeze
 
       def self.call(submission)
         new(submission).call
@@ -87,17 +109,49 @@ module Meta
       # suposição: se enabled=true mas a lista de canais está vazia, não cai
       # silenciosamente pro padrão da conta (seria notificar no lugar errado).
       def resolve_destinations
-        setting = MetaLeadNotificationSetting.find_by(form_id: @submission.form_id)
-        return [] if setting && !setting.enabled
+        s = setting
+        return [] if s && !s.enabled
 
-        if setting&.enabled
-          channels = setting.effective_channels
+        if s&.enabled
+          channels = s.effective_channels
           return channels.filter_map { |c| [c['inbox_id'], c['whatsapp_number']] if c['inbox_id'].present? && c['whatsapp_number'].present? }
         end
 
         return [] unless account_default_enabled?
 
         account_default_channels
+      end
+
+      # Preferência do formulário (se configurada) tem prioridade sobre o
+      # padrão da conta — mesma precedência dos destinos em resolve_destinations.
+      def setting
+        return @setting if defined?(@setting)
+
+        @setting = MetaLeadNotificationSetting.find_by(form_id: @submission.form_id)
+      end
+
+      # Seções a enviar: escolha do formulário → padrão da conta → nil (todas).
+      # Array explicito (inclusive []) significa "exatamente isso"; nil = todas.
+      def content_sections
+        return @content_sections if defined?(@content_sections)
+
+        @content_sections = setting&.effective_content_sections || account_default_content_sections
+      end
+
+      def account_default_content_sections
+        raw = GlobalConfigService.load('META_LEADS_NOTIFY_CONTENT', nil)
+        return nil if raw.blank?
+
+        parsed = JSON.parse(raw)
+        parsed.is_a?(Array) ? parsed.map(&:to_s) : nil
+      rescue JSON::ParserError
+        nil
+      end
+
+      # Sem preferência salva (nil) libera tudo; com preferência, só o que foi
+      # marcado. Desligar tudo e salvar é uma escolha válida (só o cabeçalho).
+      def section?(key)
+        content_sections.nil? || content_sections.include?(key.to_s)
       end
 
       def account_default_channels
@@ -136,9 +190,12 @@ module Meta
         lines << ''
         lines << "*Formulário:* #{form_label}"
         lines << "*Data:* #{formatted_date}"
-        push_entity_line(lines, 'Campanha', @submission.campaign_name, @submission.campaign_id)
-        push_entity_line(lines, 'Conjunto', @submission.adset_name, @submission.adset_id)
-        push_entity_line(lines, 'Anúncio', @submission.ad_name, @submission.ad_id)
+
+        if section?(:entities)
+          push_entity_line(lines, 'Campanha', @submission.campaign_name, @submission.campaign_id)
+          push_entity_line(lines, 'Conjunto', @submission.adset_name, @submission.adset_id)
+          push_entity_line(lines, 'Anúncio', @submission.ad_name, @submission.ad_id)
+        end
 
         criativo = creative_lines
         unless criativo.empty?
@@ -154,14 +211,19 @@ module Meta
           lines.concat(alvo)
         end
 
-        lines << ''
-        lines << '*Respostas:*'
+        lines.concat(answers_lines) if section?(:answers)
+        lines.join("\n")
+      end
+
+      def answers_lines
+        linhas = ['', '*Respostas:*']
         Array(@submission.field_data).each do |f|
           name = f['name'].to_s.tr('_', ' ').capitalize
           value = Array(f['values']).first
-          lines << "• #{name}: #{value}" if value.present?
+          linhas << "• #{name}: #{value}" if value.present?
         end
-        lines.join("\n")
+        # Seção ligada mas sem nenhuma resposta, não deixa o título solto.
+        linhas.length > 2 ? linhas : []
       end
 
       # Nome + ID entre parênteses — o ID é o que permite achar o item no
@@ -182,28 +244,47 @@ module Meta
         return [] if detalhes.blank?
 
         lines = []
-        lines << "• Texto principal: #{detalhes['texto_principal']}" if detalhes['texto_principal'].present?
-        lines << "• Título: #{detalhes['titulo']}" if detalhes['titulo'].present?
-        lines << "• Descrição: #{detalhes['descricao']}" if detalhes['descricao'].present?
+        lines << "• Texto principal: #{detalhes['texto_principal']}" if section?(:creative_text) && detalhes['texto_principal'].present?
+        lines << "• Título: #{detalhes['titulo']}" if section?(:creative_title) && detalhes['titulo'].present?
+        lines << "• Descrição: #{detalhes['descricao']}" if section?(:creative_description) && detalhes['descricao'].present?
         lines
       end
 
       def targeting_lines
+        return [] unless targeting_sections_enabled?
+
         alvo = targeting_summary
         return [] if alvo.blank?
 
         lines = []
-        lines << info_line('Orçamento', alvo[:orcamento])
-        lines << info_line('Idade', idade_label(alvo))
-        lines << info_line('Gênero', alvo[:generos])
-        lines << info_line('Local', list_label(alvo[:localizacoes]))
-        lines << info_line('Público salvo', list_label(alvo[:publicos_salvos]))
-        lines << info_line('Público personalizado', list_label(alvo[:publicos_personalizados]))
-        lines << info_line('Público semelhante', list_label(alvo[:publicos_semelhantes]))
-        lines << info_line('Direcionamento', list_label(alvo[:direcionamento]))
-        lines << info_line('Posicionamento', list_label(alvo[:posicionamento]))
-        lines << info_line('Dispositivo', list_label(alvo[:dispositivos]))
+        lines << info_line('Orçamento', alvo[:orcamento]) if section?(:budget)
+        lines << info_line('Idade', idade_label(alvo)) if section?(:age_gender)
+        lines << info_line('Gênero', alvo[:generos]) if section?(:age_gender)
+        lines << info_line('Local', list_label(alvo[:localizacoes])) if section?(:location)
+        if section?(:audiences)
+          lines << info_line('Público salvo', list_label(alvo[:publicos_salvos]))
+          lines << info_line('Público personalizado', list_label(alvo[:publicos_personalizados]))
+          lines << info_line('Público semelhante', list_label(alvo[:publicos_semelhantes]))
+        end
+        lines << info_line('Direcionamento', list_label(alvo[:direcionamento])) if section?(:audience_detail)
+        lines << info_line('Plataformas', platform_label(alvo)) if section?(:platforms)
+        lines << info_line('Posicionamento', list_label(alvo[:posicionamento])) if section?(:placements)
+        lines << info_line('Dispositivo', list_label(alvo[:dispositivos])) if section?(:devices)
         lines.compact
+      end
+
+      def targeting_sections_enabled?
+        content_sections.nil? || TARGETING_SECTIONS.any? { |s| content_sections.include?(s) }
+      end
+
+      # `publisher_platforms` ausente = posicionamentos automáticos (Advantage+),
+      # que a UI do Gerenciador mostra como "Posicionamentos automáticos" — sem
+      # isso a linha simplesmente sumia e parecia que faltava dado.
+      def platform_label(alvo)
+        plataformas = Array(alvo[:plataformas])
+        return 'Automática (Advantage+)' if plataformas.empty?
+
+        plataformas.map { |p| Meta::AdsManagerService::PLACEMENT_PLATFORM_LABELS[p] || p.to_s.tr('_', ' ').capitalize }.join(', ')
       end
 
       def info_line(label, value)
@@ -256,7 +337,6 @@ module Meta
       end
 
       def form_label
-        setting = MetaLeadNotificationSetting.find_by(form_id: @submission.form_id)
         setting&.form_name.presence || @submission.meta_lead_form&.form_name.presence || @submission.form_id
       end
 
@@ -269,6 +349,8 @@ module Meta
       # ad_id (lead veio de um teste/preview, por exemplo) simplesmente não
       # anexa imagem, não é erro.
       def creative_image_url
+        return nil unless section?(:creative_image)
+
         detalhes = creative_details
         return nil if detalhes.blank?
 

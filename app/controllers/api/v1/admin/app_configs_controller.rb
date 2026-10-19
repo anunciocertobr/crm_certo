@@ -29,9 +29,13 @@ module Api
           # (INBOX_ID/WHATSAPP_NUMBER, um par só) continuam na whitelist como
           # fallback de quem configurou antes dessa mudança — ver
           # WhatsappNotifierService#resolve_destinations.
+          # META_LEADS_NOTIFY_CONTENT é o JSON array das seções que devem ir na
+          # mensagem (mesmas chaves de WhatsappNotifierService::CONTENT_SECTIONS);
+          # vazio/ausente = envia todas.
           'meta_leads_notify' => %w[
             META_LEADS_NOTIFY_ENABLED META_LEADS_NOTIFY_INBOX_ID
             META_LEADS_NOTIFY_WHATSAPP_NUMBER META_LEADS_NOTIFY_CHANNELS
+            META_LEADS_NOTIFY_CONTENT
           ],
           # Contatos > Contatos Google — liga/desliga Contact#auto_save_to_google_contacts
           # (ver Google::AutoSaveContactJob). A conexão OAuth em si é por

@@ -31,7 +31,8 @@ class Api::V1::Admin::MetaLeadNotificationSettingsController < Api::V1::Admin::B
   private
 
   def meta_lead_notification_setting_params
-    params.permit(:page_id, :form_name, :enabled, :inbox_id, :whatsapp_number, channels: [:inbox_id, :whatsapp_number])
+    params.permit(:page_id, :form_name, :enabled, :inbox_id, :whatsapp_number,
+                  content_sections: [], channels: [:inbox_id, :whatsapp_number])
   end
 
   def serialize(setting)
@@ -44,7 +45,10 @@ class Api::V1::Admin::MetaLeadNotificationSettingsController < Api::V1::Admin::B
       whatsapp_number: setting.whatsapp_number,
       # effective_channels já resolve o fallback do canal legado (ver model),
       # então o front sempre lida com uma lista só, nunca com os dois formatos.
-      channels: setting.effective_channels
+      channels: setting.effective_channels,
+      # nil = nunca configurado (front trata como "todas"); array = escolha
+      # explícita das seções que vão na mensagem.
+      content_sections: setting.effective_content_sections
     }
   end
 end
