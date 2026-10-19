@@ -202,6 +202,26 @@ class Meta::AdsManagerService
     Result.new(success: true, data: result.data.merge('id' => result.data['account_id'] || id))
   end
 
+  # Nome da conta de anúncios + da BM dona dela, pra dar contexto na
+  # notificação do lead ("Master Belo Horizonte (CA)" dentro da BM "Master
+  # Educação Profissional"). Best-effort: conta sem BM cai só no nome da
+  # conta; falha devolve nil e a notificação segue sem o bloco.
+  def account_labels(ad_account_id:)
+    return nil if ad_account_id.blank?
+
+    id = ad_account_id.to_s.delete_prefix('act_')
+    result = get("/act_#{id}", fields: 'name,business{name}')
+    return nil unless result.success
+
+    Result.new(success: true, data: [{
+      'conta' => result.data['name'],
+      'bm' => result.data.dig('business', 'name')
+    }])
+  rescue StandardError => e
+    Rails.logger.error "Meta::AdsManagerService#account_labels(#{ad_account_id}): #{e.message}"
+    nil
+  end
+
   # Ao escolher uma conta de anúncio em Metas de Clientes, preenche sozinho
   # idade/gênero/localizações a partir do que a conta JÁ rodou (em vez do
   # usuário digitar de cabeça o público que normalmente usa) e traz a
@@ -1236,6 +1256,7 @@ class Meta::AdsManagerService
     genders = Array(targeting['genders'])
     audiences = targeting_audiences(targeting, result.data['account_id'])
     {
+      account_id: result.data['account_id'],
       idade_min: targeting['age_min'],
       idade_max: targeting['age_max'],
       # genders: [] (ausente) = sem restrição, a Meta mostra como "Todos" na

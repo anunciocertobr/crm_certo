@@ -198,6 +198,7 @@ module Meta
 
         if section?(:entities)
           entidades = []
+          entidades.concat(account_lines)
           push_entity_line(entidades, 'Campanha', @submission.campaign_name, @submission.campaign_id)
           push_entity_line(entidades, 'Conjunto', @submission.adset_name, @submission.adset_id)
           push_entity_line(entidades, 'Anúncio', @submission.ad_name, @submission.ad_id)
@@ -257,6 +258,38 @@ module Meta
         lines << "• *Título:* #{detalhes['titulo']}" if section?(:creative_title) && detalhes['titulo'].present?
         lines << "• *Descrição:* #{detalhes['descricao']}" if section?(:creative_description) && detalhes['descricao'].present?
         lines
+      end
+
+      # BM + conta de anúncios que geraram o lead, logo acima da campanha —
+      # pra saber de qual conta/BM veio sem abrir o Gerenciador. Best-effort
+      # (mesmo espírito do resto: nada aqui derruba a notificação).
+      def account_lines
+        conta = account_details
+        return [] if conta.blank?
+
+        lines = []
+        lines << "*BM:* #{conta['bm']}" if conta['bm'].present?
+        lines << "*Conta de anúncios:* #{conta['conta']}" if conta['conta'].present?
+        lines
+      end
+
+      # account_id vem do mesmo resumo do conjunto já usado no direcionamento
+      # (cache) — 1 chamada Graph a mais (conta + BM), cacheadas por instância.
+      def account_details
+        return @account_details if defined?(@account_details)
+
+        @account_details = begin
+          acct = targeting_summary && targeting_summary[:account_id]
+          if acct.blank?
+            nil
+          else
+            result = ads_service.account_labels(ad_account_id: acct)
+            result.success ? result.data.first : nil
+          end
+        rescue StandardError => e
+          Rails.logger.error("Meta::LeadAds::WhatsappNotifierService account_details: #{e.message}")
+          nil
+        end
       end
 
       def targeting_lines
