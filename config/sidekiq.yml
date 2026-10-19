@@ -23,7 +23,7 @@
   - default
   - scheduled_actions
   - integrations
-  - mailers
+  - crm_mailers
   - action_mailbox_routing
   - low
   - bot_runtime

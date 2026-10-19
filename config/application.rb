@@ -42,6 +42,12 @@ module Evolution
     # Configure as API-only application
     config.api_only = true
 
+    # CRM-only email queue. The evo-auth-service sidekiq shares this same Redis
+    # (db 1) and also registers a queue named "mailers", so CRM email jobs must
+    # use a distinct name to avoid being stolen by the other app. Keep this in
+    # sync with the :crm_mailers references in app/workers and config/sidekiq.yml.
+    config.action_mailer.deliver_later_queue_name = 'crm_mailers'
+
     config.eager_load_paths << Rails.root.join('lib')
 
     # EvoFlow::EVENT_NAMES is grouped with Events::Types under lib/events/ but

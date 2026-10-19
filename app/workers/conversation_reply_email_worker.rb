@@ -1,7 +1,7 @@
 # TODO: lets move this to active job, since thats what we use over all
 class ConversationReplyEmailWorker
   include Sidekiq::Worker
-  sidekiq_options queue: :mailers
+  sidekiq_options queue: :crm_mailers
 
   def perform(conversation_id, last_queued_id)
     @conversation = Conversation.find(conversation_id)

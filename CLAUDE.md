@@ -121,3 +121,50 @@ O container de dev (`evo-crm-community-evo-crm-1`, via docker-compose local)
 não tem os dados reais de produção (`Integrations::Hook` etc.) — pra testar
 integrações externas de verdade (Google, Meta, etc.) contra credenciais
 reais, é preciso rodar via SSH no container de produção, com cuidado.
+
+## Sidekiq: filas compartilhadas com o serviço de auth (Redis db 1)
+
+O `evocrm_evocrm_crm_sidekiq` (este repo) e o `evocrm_evocrm_auth_sidekiq`
+(imagem `evoapicloud/evo-auth-service-community`, **outro app**) apontam para
+o **mesmo Redis** (`redis://evocrm_redis:6379/1`) e registravam filas de nome
+igual. O sidekiq do auth consumia `default`/`webhooks`/`low_priority` — que
+são filas deste repo — e, ao pegar um job do CRM, quebrava com
+`uninitialized constant Webhooks (NameError)`. Efeito real (2026-10-19): o
+job do webhook de lead (`Webhooks::FacebookLeadgenEventsJob`, fila
+`default`) às vezes só rodava na retentativa — e podia ir pra dead sem
+notificar o lead, sem erro visível na API.
+
+Correção, em duas frentes:
+
+1. **`auth_sidekiq` limitado às filas dele.** A imagem é imutável (não é
+   deste repo), então o ajuste é no spec do serviço Swarm:
+   ```bash
+   ssh crm-certo-vps 'docker service update --detach=false \
+     --args "bundle exec sidekiq -C config/sidekiq.yml -q licensing -q mailers" \
+     evocrm_evocrm_auth_sidekiq'
+   ```
+   (`licensing` = os únicos jobs do auth; `mailers` = e-mails de 2FA.)
+   O Sidekiq 8 faz `parse_config(...).merge(opts)`, então os `-q` da CLI
+   vencem o `:queues` do `sidekiq.yml` do auth **sem rebuildar a imagem**.
+   **Atenção:** isso vive no spec do serviço — se o time reimplantar o
+   `evocrm_evocrm_auth_sidekiq` pelo Easypanel/stack, pode sumir; repetir o
+   comando. Conferir as filas que cada sidekiq registra (heartbeat no Redis):
+   ```bash
+   RID=$(ssh crm-certo-vps "docker ps --format '{{.Names}}' | grep evocrm_evocrm_redis | head -1")
+   ssh crm-certo-vps "docker exec $RID redis-cli -n 1 SMEMBERS processes"   # identidades
+   # depois: HGET <identidade> info  ->  campo "queues"  (ex.: ["licensing","mailers"])
+   ```
+2. **Fila de e-mail deste repo renomeada `mailers` → `crm_mailers`.** Os dois
+   apps precisam de uma fila chamada `mailers` e não dá pra evitar o nome
+   igual mexendo só num lado, então o CRM passou a usar `crm_mailers`.
+   Alterado: `config/application.rb`
+   (`config.action_mailer.deliver_later_queue_name = 'crm_mailers'`),
+   `config/sidekiq.yml` e os três workers com `sidekiq_options queue:
+   :mailers` (`app/workers/email_reply_worker.rb`,
+   `app/workers/conversation_reply_email_worker.rb`,
+   `app/workers/sendgrid/send_email_worker.rb`).
+
+Depois disso não há mais nenhuma fila com nome em comum entre os dois
+sidekiqs (CRM: `default`, ..., `crm_mailers`; auth: `licensing`, `mailers`).
+Se um job do CRM precisar mudar de fila no futuro, manter esse invariante:
+**nenhum nome de fila do CRM pode coincidir com `licensing` ou `mailers`.**

@@ -5,7 +5,7 @@ module Sendgrid
   # message failed, so the worker swallows the error instead of bubbling it.
   class SendEmailWorker
     include Sidekiq::Worker
-    sidekiq_options queue: :mailers, retry: 0
+    sidekiq_options queue: :crm_mailers, retry: 0
 
     def perform(message_id)
       message = Message.find_by(id: message_id)
