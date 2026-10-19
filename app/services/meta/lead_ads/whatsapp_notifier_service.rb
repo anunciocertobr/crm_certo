@@ -184,17 +184,26 @@ module Meta
         "+#{digits}"
       end
 
+      # Ordem pedida pelo usuário: Data, Formulário, Respostas, depois Campanha
+      # (e o resto — Criativo, Direcionamento).
       def build_template
         lines = []
         lines << '🔔 *Novo lead — Meta Ads*'
         lines << ''
-        lines << "*Formulário:* #{form_label}"
         lines << "*Data:* #{formatted_date}"
+        lines << "*Formulário:* #{form_label}"
+
+        lines.concat(answers_lines) if section?(:answers)
 
         if section?(:entities)
-          push_entity_line(lines, 'Campanha', @submission.campaign_name, @submission.campaign_id)
-          push_entity_line(lines, 'Conjunto', @submission.adset_name, @submission.adset_id)
-          push_entity_line(lines, 'Anúncio', @submission.ad_name, @submission.ad_id)
+          entidades = []
+          push_entity_line(entidades, 'Campanha', @submission.campaign_name, @submission.campaign_id)
+          push_entity_line(entidades, 'Conjunto', @submission.adset_name, @submission.adset_id)
+          push_entity_line(entidades, 'Anúncio', @submission.ad_name, @submission.ad_id)
+          unless entidades.empty?
+            lines << ''
+            lines.concat(entidades)
+          end
         end
 
         criativo = creative_lines
@@ -211,7 +220,6 @@ module Meta
           lines.concat(alvo)
         end
 
-        lines.concat(answers_lines) if section?(:answers)
         lines.join("\n")
       end
 
@@ -244,9 +252,9 @@ module Meta
         return [] if detalhes.blank?
 
         lines = []
-        lines << "• Texto principal: #{detalhes['texto_principal']}" if section?(:creative_text) && detalhes['texto_principal'].present?
-        lines << "• Título: #{detalhes['titulo']}" if section?(:creative_title) && detalhes['titulo'].present?
-        lines << "• Descrição: #{detalhes['descricao']}" if section?(:creative_description) && detalhes['descricao'].present?
+        lines << "• *Texto principal:* #{detalhes['texto_principal']}" if section?(:creative_text) && detalhes['texto_principal'].present?
+        lines << "• *Título:* #{detalhes['titulo']}" if section?(:creative_title) && detalhes['titulo'].present?
+        lines << "• *Descrição:* #{detalhes['descricao']}" if section?(:creative_description) && detalhes['descricao'].present?
         lines
       end
 
@@ -268,7 +276,7 @@ module Meta
         end
         lines << info_line('Direcionamento', list_label(alvo[:direcionamento])) if section?(:audience_detail)
         lines << info_line('Plataformas', platform_label(alvo)) if section?(:platforms)
-        lines << info_line('Posicionamento', list_label(alvo[:posicionamento])) if section?(:placements)
+        lines << info_line('Posicionamento', placements_label(alvo)) if section?(:placements)
         lines << info_line('Dispositivo', list_label(alvo[:dispositivos])) if section?(:devices)
         lines.compact
       end
@@ -285,6 +293,13 @@ module Meta
         return 'Automática (Advantage+)' if plataformas.empty?
 
         plataformas.map { |p| Meta::AdsManagerService::PLACEMENT_PLATFORM_LABELS[p] || p.to_s.tr('_', ' ').capitalize }.join(', ')
+      end
+
+      # Posicionamentos por plataforma; vazio = automáticos (Advantage+), que é
+      # como o Gerenciador de Anúncios mostra o conjunto. Antes a linha sumia
+      # e parecia dado faltando.
+      def placements_label(alvo)
+        list_label(alvo[:posicionamento]) || 'Automático (Advantage+)'
       end
 
       def info_line(label, value)

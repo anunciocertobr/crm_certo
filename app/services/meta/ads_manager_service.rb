@@ -453,8 +453,13 @@ class Meta::AdsManagerService
       'video' => video_url,
       'thumbnail_url' => thumbnail,
       'carrossel' => carousel,
-      'titulo' => creative['title'],
-      'texto_principal' => creative['body'],
+      # Nem todo anúncio popula title/body achatados no nó creative: nos de
+      # link/vídeo clássicos o título fica em link_data.name e o texto em
+      # link_data.message (o criativo Advantage+ idem, em video_data). Sem
+      # esses fallbacks o bloco de criativo da notificação/tela vinha só com
+      # o texto principal e "faltava" título/descrição.
+      'titulo' => creative['title'].presence || link_data['name'].presence || video_data['title'].presence,
+      'texto_principal' => creative['body'].presence || link_data['message'].presence || video_data['message'].presence,
       'descricao' => creative_description(link_data, video_data),
       'criativo_nome' => creative['name']
     }])
@@ -1537,8 +1542,11 @@ class Meta::AdsManagerService
       imagem: creative['image_url'] || link_data['picture'] || creative['thumbnail_url'] || video_data['image_url'],
       video: video_url,
       link: ad_permalink(ad_id),
-      texto_principal: creative['body'].presence,
-      titulo: creative['title'].presence,
+      # Mesmos fallbacks de criativo de link/vídeo usados em creative_details
+      # (link_data.name/message, video_data.title/message) — o título/descrição
+      # costuma estar aí, não nos campos achatados do nó creative.
+      texto_principal: creative['body'].presence || link_data['message'].presence || video_data['message'].presence,
+      titulo: creative['title'].presence || link_data['name'].presence || video_data['title'].presence,
       descricao: creative_description(link_data, video_data)
     }
   rescue StandardError => e
