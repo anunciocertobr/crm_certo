@@ -418,6 +418,23 @@ class Meta::AdsManagerService
           { 'imagem' => card['picture'] || card['image_url'], 'nome' => card['name'], 'descricao' => card['description'] }
         end
 
+        # A Graph API devolve `page_welcome_message` como STRING com JSON
+        # dentro (não como objeto aninhado, ao contrário de todo o resto de
+        # `object_story_spec`) — confirmado ao vivo em 20/10/2026. Sem este
+        # parse, o front (que espera `.text_format.message.text` navegável)
+        # nunca lia a saudação/perguntas rápidas de volta ao duplicar, por
+        # mais que o valor estivesse lá — vinha como texto cru, não objeto.
+        if link_data['page_welcome_message'].is_a?(String)
+          begin
+            link_data = link_data.merge('page_welcome_message' => JSON.parse(link_data['page_welcome_message']))
+            creative = creative.merge(
+              'object_story_spec' => (creative['object_story_spec'] || {}).merge('link_data' => link_data)
+            )
+          rescue JSON::ParserError
+            Rails.logger.warn("Meta::AdsManagerService: page_welcome_message do anúncio #{ad['id']} não é JSON válido, ignorando")
+          end
+        end
+
         creatives_by_ad_id[ad['id']] = creative.merge(
           'imagem' => creative['image_url'] || link_data['picture'],
           'thumbnail_url' => creative['thumbnail_url'] || video_data['image_url'],
