@@ -344,8 +344,8 @@ class Meta::AdsManagerService
       # `campaign_ads_creatives` - ver esse método logo abaixo - chamado só
       # quando alguém abre "Duplicar" numa campanha (poucos anúncios), nunca
       # pra árvore inteira da conta.
-      fields: 'id,name,status,objective,description,' \
-              'adsets{name,status,description,daily_budget,lifetime_budget,targeting,promoted_object,start_time,end_time,' \
+      fields: 'id,name,status,objective,description,daily_budget,lifetime_budget,' \
+              'adsets{name,status,description,daily_budget,lifetime_budget,bid_amount,targeting,promoted_object,start_time,end_time,' \
               'optimization_goal,bid_strategy,ads{name,status}}',
       limit: 200
     )
@@ -382,9 +382,16 @@ class Meta::AdsManagerService
       # anúncios, porque `creatives_by_ad_id` nunca tinha entrada pra eles.
       # 100 cobre qualquer conjunto real desta conta; se algum dia existir
       # um conjunto com mais que isso, o sintoma volta igual.
+      # `message_send_param` NUNCA entra nesta lista: é campo só-escrita da
+      # Graph API (aceita no POST, mas o GET recusa com "Tried accessing
+      # nonexisting field" — confirmado ao vivo em 20/10/2026). Duplicar um
+      # anúncio de mensagem simples (sem perguntas rápidas) por isso nunca
+      # recupera a saudação de volta — limitação real da própria Meta, não
+      # bug daqui. `page_welcome_message` (usado quando a saudação vem com
+      # perguntas rápidas/preenchimento automático) é de leitura normal.
       fields: 'id,ads.limit(100){id,creative{name,body,title,image_url,thumbnail_url,video_id,' \
-              'object_story_spec{page_id,link_data{description,name,message,call_to_action,picture,child_attachments},' \
-              'video_data{title,message,image_url}}}}',
+              'object_story_spec{page_id,link_data{description,name,message,call_to_action,picture,child_attachments,' \
+              'page_welcome_message},video_data{title,message,image_url}}}}',
       limit: 200
     )
     return result unless result.success
@@ -635,11 +642,16 @@ class Meta::AdsManagerService
     adsets_specs = campanha['adsets'].presence || [campanha]
     primary_page_id = adsets_specs.first&.dig('page_id').presence || campanha['page_id']
     return Result.new(success: false, error: 'Página do Facebook sem page_id configurado (necessário pro criativo).') if primary_page_id.blank?
-    # Mesmo raciocínio do page_id acima: só existe um formulário por
-    # campanha aqui (criado uma vez, reaproveitado em todos os conjuntos),
-    # e o front só deixa escolher formulário por conjunto — usa o do
-    # primeiro conjunto que tiver um escolhido.
-    primary_lead_form_id = adsets_specs.map { |a| a['lead_form_id'] }.compact.first.presence || campanha['lead_form_id']
+    # Formulário "padrão" da campanha: usado como reserva só pros anúncios
+    # que NÃO escolherem o próprio formulário (ver `ad_lead_form_id` em
+    # `create_adset_with_ads` — o seletor agora vive no Anúncio, não mais no
+    # Conjunto). Procura em qualquer nível (conjunto OU anúncio individual)
+    # pra reaproveitar um formulário já existente em vez de criar um novo
+    # genérico à toa quando pelo menos um anúncio já escolheu um.
+    primary_lead_form_id =
+      adsets_specs
+        .flat_map { |a| [a['lead_form_id'], *(a['ads'] || []).map { |ad| ad['lead_form_id'] }] }
+        .compact.first.presence || campanha['lead_form_id']
 
     act = "act_#{ad_account_id}"
     lead_form_id = nil
@@ -865,9 +877,18 @@ class Meta::AdsManagerService
         'page_id' => ad_spec['page_id'] || adset_spec['page_id'],
         'optimization_goal' => ad_spec['optimization_goal'] || adset_spec['optimization_goal'],
         'mensagem_destino' => ad_spec['mensagem_destino'] || adset_spec['mensagem_destino'],
-        'message_template' => ad_spec['message_template'] || adset_spec['message_template']
+        'message_template' => ad_spec['message_template'] || adset_spec['message_template'],
+        'autofill_message' => ad_spec['autofill_message'] || adset_spec['autofill_message'],
+        'ice_breakers' => ad_spec['ice_breakers'] || adset_spec['ice_breakers']
       )
-      creative = build_creative(act: act, campanha: ad_spec, lead_form_id: lead_form_id)
+      # Formulário por ANÚNCIO (seletor agora vive no bloco do Anúncio, não
+      # mais no do Conjunto — ver AdBlock no front): se este anúncio
+      # específico escolheu um formulário já existente, reaproveita ele;
+      # senão cai no `lead_form_id` resolvido pra campanha inteira (o
+      # genérico criado uma vez, comportamento antigo, pros anúncios que
+      # deixaram o campo em branco).
+      ad_lead_form_id = ad_spec['lead_form_id'].presence || lead_form_id
+      creative = build_creative(act: act, campanha: ad_spec, lead_form_id: ad_lead_form_id)
       return step_error(creative, 'criativo') unless creative.success
 
       ad = create_ad_only(act: act, adset_id: adset.data['id'], creative_id: creative.data['id'], campanha: ad_spec)
@@ -3116,14 +3137,48 @@ class Meta::AdsManagerService
                    }
                  end
 
-    # "Modelo de mensagem" (AdSetMetaFields) — mensagem pronta sugerida a
-    # quem abre a conversa a partir do anúncio. Confirmado ao vivo (conta de
-    # teste 588639403580243) que `message_send_param` só é aceito como
-    # IRMÃO de `link_data`/`video_data` dentro de object_story_spec — a
-    # Graph API recusa com o subcode 1443050 ("campo incompatível") quando
-    # vai aninhado dentro de link_data, que seria o lugar mais intuitivo.
-    if messaging_flow?(campanha) && campanha['message_template'].present?
-      story_spec[:message_send_param] = { message: { text: campanha['message_template'] } }
+    # "Modelo de mensagem" (AdLeadFormAndMessageFields, nível do ANÚNCIO) —
+    # saudação/preenchimento automático/perguntas rápidas sugeridas a quem
+    # abre a conversa a partir deste anúncio. Dois campos DIFERENTES da
+    # Graph API, confirmados ao vivo em contas de teste reais:
+    # - `message_send_param` (texto simples, sem perguntas rápidas) só é
+    #   aceito como IRMÃO de `link_data`/`video_data` dentro de
+    #   object_story_spec — a Graph API recusa com o subcode 1443050
+    #   ("campo incompatível") quando vai aninhado dentro de link_data, que
+    #   seria o lugar mais intuitivo (confirmado 2026-10-15,
+    #   act_588639403580243).
+    # - `page_welcome_message` (saudação + preenchimento automático OU
+    #   perguntas rápidas, até 3 — "ice breakers" reais da documentação da
+    #   Meta) é o oposto: só é aceito DENTRO de `link_data`, nunca como
+    #   irmão dela — testado criando um adcreative isolado E anexando a um
+    #   anúncio de teste real (confirmado 2026-10-20, mesma conta). Não
+    #   existe equivalente em `video_data` — anúncio de vídeo com conversa
+    #   usa só o `message_send_param` simples abaixo.
+    if messaging_flow?(campanha)
+      ice_breakers = Array(campanha['ice_breakers']).map { |t| t.to_s.strip }.reject(&:empty?).first(3)
+      autofill_message = campanha['autofill_message'].to_s.strip
+      greeting = campanha['message_template'].to_s.strip
+
+      if story_spec[:link_data] && (ice_breakers.any? || autofill_message.present?)
+        text_format_message = { text: greeting.presence }.compact
+        customer_action_type =
+          if ice_breakers.any?
+            text_format_message[:ice_breakers] = ice_breakers.map { |t| { title: t } }
+            'ice_breakers'
+          else
+            text_format_message[:autofill_message] = { content: autofill_message }
+            'autofill_message'
+          end
+        story_spec[:link_data][:page_welcome_message] = {
+          type: 'VISUAL_EDITOR',
+          version: 2,
+          landing_screen_type: 'welcome_message',
+          media_type: 'text',
+          text_format: { customer_action_type: customer_action_type, message: text_format_message }
+        }
+      elsif greeting.present?
+        story_spec[:message_send_param] = { message: { text: greeting } }
+      end
     end
 
     post("/#{act}/adcreatives", { object_story_spec: story_spec.to_json })
