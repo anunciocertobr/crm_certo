@@ -1641,11 +1641,15 @@ class Meta::AdsManagerService
   # Best-effort: nem todo anúncio tem effective_object_story_id (ver
   # comentário acima), então uma falha aqui não derruba nome/imagem — só
   # fica sem link de post, que é o único dado que depende dele.
+  # `effective_object_story_id` direto no nó do anúncio dá sempre
+  # "Tried accessing nonexisting field" (código 100) nesta versão da Graph
+  # API — confirmado ao vivo (21/10) contra um anúncio real. Só funciona
+  # aninhado em `creative{}`.
   def ad_permalink(ad_id)
-    result = get("/#{ad_id}", fields: 'effective_object_story_id')
+    result = get("/#{ad_id}", fields: 'creative{effective_object_story_id}')
     return nil unless result.success
 
-    story_id = result.data['effective_object_story_id']
+    story_id = result.data.dig('creative', 'effective_object_story_id')
     return nil unless story_id.present? && story_id.include?('_')
 
     page_id, post_id = story_id.split('_', 2)
