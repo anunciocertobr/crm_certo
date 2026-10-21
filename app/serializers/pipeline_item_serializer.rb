@@ -48,7 +48,7 @@ module PipelineItemSerializer
     end
   end
 
-  # Batch pra serializar coleções sem 1 query de WhatsappAdLead por item —
+  # Batch pra serializar coleções sem 1 query de AdLead por item —
   # mesma ideia de task_counts_for acima. O mais recente por contato vence
   # (um contato pode ter clicado em mais de um anúncio ao longo do tempo;
   # o card de lead reflete a atribuição mais recente).
@@ -56,7 +56,7 @@ module PipelineItemSerializer
     contact_ids = items.filter_map { |i| i.contact&.id }.uniq
     return {} if contact_ids.empty?
 
-    WhatsappAdLead.where(contact_id: contact_ids).order(created_at: :desc).group_by(&:contact_id).transform_values(&:first)
+    AdLead.where(contact_id: contact_ids).order(created_at: :desc).group_by(&:contact_id).transform_values(&:first)
   end
 
   def serialize(pipeline_item, include_entity: false, include_tasks_info: false,
@@ -102,7 +102,7 @@ module PipelineItemSerializer
 
     contact_for_attribution = pipeline_item.contact
     if contact_for_attribution.present?
-      lead = ad_attribution_by_contact ? ad_attribution_by_contact[contact_for_attribution.id] : WhatsappAdLead.where(contact_id: contact_for_attribution.id).order(created_at: :desc).first
+      lead = ad_attribution_by_contact ? ad_attribution_by_contact[contact_for_attribution.id] : AdLead.where(contact_id: contact_for_attribution.id).order(created_at: :desc).first
       result[:ad_attribution] = serialize_ad_attribution(lead) if lead.present?
     end
 
@@ -212,11 +212,19 @@ module PipelineItemSerializer
   def serialize_ad_attribution(lead)
     {
       platform: lead.platform,
+      channel: lead.channel,
       source_id: lead.source_id,
       source_type: lead.source_type,
       source_url: lead.source_url,
       ctwaclid: lead.ctwaclid,
       gclid: lead.gclid,
+      ttclid: lead.ttclid,
+      igclid: lead.igclid,
+      mesengerclid: lead.mesengerclid,
+      msclkid: lead.msclkid,
+      fbp: lead.fbp,
+      fbc: lead.fbc,
+      externalid: lead.externalid,
       headline: lead.headline,
       body: lead.body,
       thumbnail_url: lead.thumbnail_url,
@@ -230,7 +238,8 @@ module PipelineItemSerializer
       utm_medium: lead.utm_medium,
       utm_campaign: lead.utm_campaign,
       utm_content: lead.utm_content,
-      utm_term: lead.utm_term
+      utm_term: lead.utm_term,
+      utm_id: lead.utm_id
     }
   end
 

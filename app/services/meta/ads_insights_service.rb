@@ -110,7 +110,7 @@ class Meta::AdsInsightsService
     get("/act_#{ad_account_id}/campaigns", access_token: @token, fields: 'id,name,status,objective', limit: 500)
   end
 
-  # Usado pelo enriquecimento de WhatsappAdLead: o `source_id` capturado do
+  # Usado pelo enriquecimento de AdLead: o `source_id` capturado do
   # externalAdReplyInfo normalmente é o id do anúncio (ad_id) na Graph API.
   def ad(ad_id)
     return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?

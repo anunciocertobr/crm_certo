@@ -109,8 +109,9 @@ class Whatsapp::IncomingMessageBaseService
     referral = message[:referral]
     return if referral.blank? || @conversation.blank?
 
-    WhatsappAdLead.find_or_create_by(conversation_id: @conversation.id, platform: 'meta') do |lead|
+    AdLead.find_or_create_by(conversation_id: @conversation.id, platform: 'meta') do |lead|
       lead.contact_id = @contact.id
+      lead.channel = 'whatsapp'
       lead.message_id = @message.id
       lead.source_id = referral[:source_id]
       lead.source_url = referral[:source_url]

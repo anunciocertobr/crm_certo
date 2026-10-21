@@ -222,7 +222,7 @@ Rails.application.routes.draw do
         post 'dropbox', to: 'dropbox#handle'
         post 'google_contacts', to: 'google_contacts#handle'
         post 'criativos', to: 'criativos#handle'
-        resources :whatsapp_ad_leads, only: [:index, :update]
+        resources :ad_leads, only: [:index, :update]
       end
 
       resource :global_config, controller: 'global_config', only: [:show]

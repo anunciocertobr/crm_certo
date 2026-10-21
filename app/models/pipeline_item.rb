@@ -512,7 +512,7 @@ class PipelineItem < ApplicationRecord
     )
   end
 
-  # Assíncrono: resolver o ctwa_clid (WhatsappAdLead) e montar/enviar o
+  # Assíncrono: resolver o ctwa_clid (AdLead) e montar/enviar o
   # evento CAPI pode envolver uma chamada HTTP pra Graph API (pixel/dataset
   # do anúncio) — não queremos isso na request que salvou a qualificação.
   def send_lead_quality_to_meta

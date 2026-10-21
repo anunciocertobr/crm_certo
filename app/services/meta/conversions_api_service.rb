@@ -29,24 +29,29 @@ module Meta
       @token.present?
     end
 
-    # whatsapp_ad_lead: o WhatsappAdLead que carrega ad_id/ctwaclid — sem ele
+    # ad_lead: o AdLead que carrega ad_id/ctwaclid/fbp/fbc — sem ele
     # (lead que não veio de um clique em anúncio rastreado) o evento não tem
     # como ser enviado com atribuição; a chamada falha explicitamente em vez
     # de mandar um evento "cego" que não ajudaria a otimização da Meta.
-    def send_event(event_name:, whatsapp_ad_lead:, contact: nil, custom_data: {}, user_data_overrides: {})
+    # `fbp`/`fbc` ainda não têm captura real em nenhum fluxo (ver plano de
+    # atribuição omnichannel) — ficam `nil`/`.compact`ados até uma fase
+    # futura popular essas colunas; o código já manda quando existir.
+    def send_event(event_name:, ad_lead:, contact: nil, custom_data: {}, user_data_overrides: {})
       return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
-      return Result.new(success: false, error: 'Lead sem anúncio vinculado (ad_id ausente) — sem atribuição pra mandar.') if whatsapp_ad_lead&.ad_id.blank?
+      return Result.new(success: false, error: 'Lead sem anúncio vinculado (ad_id ausente) — sem atribuição pra mandar.') if ad_lead&.ad_id.blank?
 
-      pixel_result = pixel_id_for_ad(whatsapp_ad_lead.ad_id)
+      pixel_result = pixel_id_for_ad(ad_lead.ad_id)
       return pixel_result unless pixel_result.success
 
       pixel_id = pixel_result.data
       page_id = GlobalConfigService.load('META_CONVERSIONS_PAGE_ID', nil)
-      contact ||= whatsapp_ad_lead.contact
+      contact ||= ad_lead.contact
 
       user_data = {
         ph: hash_field(contact&.phone_number),
-        ctwa_clid: whatsapp_ad_lead.ctwaclid.presence,
+        ctwa_clid: ad_lead.ctwaclid.presence,
+        fbp: ad_lead.fbp.presence,
+        fbc: ad_lead.fbc.presence,
         page_id: page_id
       }.merge(user_data_overrides).compact
 

@@ -31,15 +31,15 @@ module Meta
       contact = item.contact
       return if contact.blank?
 
-      whatsapp_ad_lead = WhatsappAdLead.where(contact_id: contact.id).order(created_at: :desc).first
-      if whatsapp_ad_lead.blank?
-        Rails.logger.info "Meta::SendLeadQualityJob: pipeline_item=#{pipeline_item_id} sem WhatsappAdLead — sem anúncio pra atribuir, não envia."
+      ad_lead = AdLead.where(contact_id: contact.id).order(created_at: :desc).first
+      if ad_lead.blank?
+        Rails.logger.info "Meta::SendLeadQualityJob: pipeline_item=#{pipeline_item_id} sem AdLead — sem anúncio pra atribuir, não envia."
         return
       end
 
       result = Meta::ConversionsApiService.new.send_event(
         event_name: 'LeadQualified',
-        whatsapp_ad_lead: whatsapp_ad_lead,
+        ad_lead: ad_lead,
         contact: contact,
         custom_data: {
           lead_quality: item.lead_quality,

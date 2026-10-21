@@ -1,12 +1,13 @@
 # Serve o dashboard "Leads Dashboard" (Relatórios) a partir dos dados
-# capturados de verdade no WhatsApp (WhatsappAdLead), sem passar pelo n8n —
-# ver Whatsapp::EvolutionHandlers::ContentHandlers#handle_ad_referral.
-class Api::V1::Reports::WhatsappAdLeadsController < Api::V1::BaseController
+# capturados de verdade (AdLead), sem passar pelo n8n — ver
+# Whatsapp::AdReferralCapture / Whatsapp::IncomingMessageBaseService#capture_official_ad_referral.
+class Api::V1::Reports::AdLeadsController < Api::V1::BaseController
   # Devolve um array puro (não {data: [...]}) — o HTML do relatório checa
   # Array.isArray(result) direto na resposta, igual fazia com o n8n.
   def index
-    leads = WhatsappAdLead.includes(:contact)
+    leads = AdLead.includes(:contact)
     leads = leads.where(platform: params[:platform]) if params[:platform].present?
+    leads = leads.where(channel: params[:channel]) if params[:channel].present?
     leads = leads.where(status: params[:status]) if params[:status].present?
     leads = leads.where(campaign_id: params[:campaign_id]) if params[:campaign_id].present?
     leads = leads.where(created_at: parse_date(params[:date_start])..parse_date(params[:date_stop], end_of_day: true)) if params[:date_start].present?
@@ -16,7 +17,7 @@ class Api::V1::Reports::WhatsappAdLeadsController < Api::V1::BaseController
   end
 
   def update
-    lead = WhatsappAdLead.find(params[:id])
+    lead = AdLead.find(params[:id])
     lead.update!(lead_params)
     render json: { data: serialize(lead) }
   rescue ActiveRecord::RecordNotFound
@@ -48,6 +49,7 @@ class Api::V1::Reports::WhatsappAdLeadsController < Api::V1::BaseController
       email: lead.contact&.email,
       data_criacao: lead.created_at,
       plataforma: lead.platform,
+      canal: lead.channel,
       campaign_id: lead.campaign_id,
       campaign_name: lead.campaign_name,
       adset_name: lead.adset_name,
@@ -57,11 +59,19 @@ class Api::V1::Reports::WhatsappAdLeadsController < Api::V1::BaseController
       Anuncio_thumbnail_url: lead.thumbnail_url,
       ctwaclid: lead.ctwaclid,
       gclid: lead.gclid,
+      ttclid: lead.ttclid,
+      igclid: lead.igclid,
+      mesengerclid: lead.mesengerclid,
+      msclkid: lead.msclkid,
+      fbp: lead.fbp,
+      fbc: lead.fbc,
+      externalid: lead.externalid,
       utm_source: lead.utm_source,
       utm_medium: lead.utm_medium,
       utm_campaign: lead.utm_campaign,
       utm_term: lead.utm_term,
       utm_content: lead.utm_content,
+      utm_id: lead.utm_id,
       status: lead.status,
       valor_venda: lead.valor_venda,
       enriched: lead.enriched

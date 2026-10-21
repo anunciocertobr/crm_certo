@@ -123,11 +123,11 @@ TOKEN_CONST_ERROR =
     #    o código abaixo garante uma chamada só.
     #
     # 3. bloqueia escrita no navegador. O relatório tem células editáveis que
-    #    fazem PATCH em /whatsapp_ad_leads/:id e um link público não pode alterar
+    #    fazem PATCH em /ad_leads/:id e um link público não pode alterar
     #    nada. Defesa em profundidade: a rota pública nem existe (404), mas o
     #    cliente veria um erro seco.
     #
-    # 4. responde vazio para /whatsapp_ad_leads. A aba está escondida, mas a
+    # 4. responde vazio para /ad_leads. A aba está escondida, mas a
     #    página carrega esses dados na inicialização e, sem rota pública, o 404
     #    aparecia como "Erro ao carregar dados dos Leads" no topo da página.
     #    `processLeadsData` do HTML espera array, então `[]` some com o banner
@@ -180,7 +180,7 @@ TOKEN_CONST_ERROR =
               ));
             }
             var href = typeof input === 'string' ? input : (input && input.url);
-            if (href && href.indexOf('/whatsapp_ad_leads') !== -1) {
+            if (href && href.indexOf('/ad_leads') !== -1) {
               return Promise.resolve(new Response('[]', {
                 status: 200, headers: { 'Content-Type': 'application/json' }
               }));
