@@ -56,6 +56,13 @@ gem 'azure-storage-blob', git: 'https://github.com/chatwoot/azure-storage-ruby',
 gem 'google-cloud-storage', '>= 1.48.0', require: false
 gem 'image_processing'
 
+# Geração do DANFSe (documento auxiliar da NFS-e) em PDF — puro Ruby, sem
+# binário externo (wkhtmltopdf etc.) pra não mexer na imagem Docker.
+# `prawn-table` é gem separado do `prawn` principal desde que o suporte a
+# tabela saiu do core — sem ele, `pdf.table` dá NoMethodError.
+gem 'prawn', '~> 2.4'
+gem 'prawn-table', '~> 0.2'
+
 ##-- gems for database --#
 gem 'groupdate'
 gem 'pg'

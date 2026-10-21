@@ -1,5 +1,5 @@
 class Api::V1::Finances::ServiceInvoicesController < Api::V1::BaseController
-  before_action :set_service_invoice, only: %i[show cancel]
+  before_action :set_service_invoice, only: %i[show cancel pdf]
 
   def index
     invoices = ServiceInvoice.includes(:fiscal_establishment).order(created_at: :desc)
@@ -8,6 +8,23 @@ class Api::V1::Finances::ServiceInvoicesController < Api::V1::BaseController
 
   def show
     success_response(data: serialize(@invoice, include_xml: true))
+  end
+
+  # DANFSe gerado on-the-fly a partir do xml_retorno + colunas do invoice —
+  # ver ServiceInvoices::DanfsePdfService pro porquê de não depender de
+  # nenhum portal público da prefeitura.
+  def pdf
+    unless @invoice.authorized?
+      return error_response(ApiErrorCodes::BUSINESS_RULE_VIOLATION,
+                             'NFS-e ainda não autorizada — sem dados da prefeitura pra gerar o PDF',
+                             status: :unprocessable_entity)
+    end
+
+    pdf_data = ServiceInvoices::DanfsePdfService.call(@invoice)
+    send_data pdf_data, filename: "nfse-#{@invoice.numero_nfse || @invoice.numero_rps}.pdf",
+                         type: 'application/pdf', disposition: 'inline'
+  rescue ServiceInvoices::DanfsePdfService::Error => e
+    error_response(ApiErrorCodes::BUSINESS_RULE_VIOLATION, e.message, status: :unprocessable_entity)
   end
 
   def create

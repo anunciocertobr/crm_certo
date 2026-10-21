@@ -56,6 +56,7 @@ Rails.application.routes.draw do
         resources :service_invoices, only: %i[index create show], controller: 'finances/service_invoices' do
           member do
             post :cancel
+            get :pdf
           end
         end
       end
