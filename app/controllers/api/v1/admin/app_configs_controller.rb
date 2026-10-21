@@ -37,6 +37,14 @@ module Api
             META_LEADS_NOTIFY_WHATSAPP_NUMBER META_LEADS_NOTIFY_CHANNELS
             META_LEADS_NOTIFY_CONTENT
           ],
+          # Padrão da conta pra Meta::LeadAds::ImportService — pipeline/fase que
+          # um lead de formulário SEM mapeamento próprio (sem MetaLeadForm
+          # ativo pro form_id) cai por padrão, em vez de ficar preso em
+          # status 'unmapped_form' pra sempre. Mesma ideia/par de chaves do
+          # 'meta_leads_notify' acima, só que pra pipeline em vez de canal.
+          'meta_leads_pipeline_default' => %w[
+            META_LEADS_PIPELINE_ID META_LEADS_STAGE_ID
+          ],
           # Contatos > Contatos Google — liga/desliga Contact#auto_save_to_google_contacts
           # (ver Google::AutoSaveContactJob). A conexão OAuth em si é por
           # Integrations::Hook(app_id: 'google_workspace'), não por aqui —

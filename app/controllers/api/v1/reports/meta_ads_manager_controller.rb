@@ -83,6 +83,8 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
       respond(service.leadgen_form_leads(page_id: params.require(:id_pagina), form_id: params.require(:id_formulario)))
     when 'buscar_leads_pagina'
       respond(service.search_leads_in_page(page_id: params.require(:id_pagina), query: params.require(:busca)))
+    when 'status_pipeline_dos_leads'
+      render json: pipeline_status_for_leads(Array(params[:leadgen_ids]))
     when 'atualizar_status_formulario_lead'
       respond(service.update_leadgen_form_status(
         page_id: params.require(:id_pagina),
@@ -311,6 +313,35 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
   end
 
   private
+
+  # Liga um lead vindo direto da Graph API (tela "Ver Leads",
+  # LeadFormLeadsDialog.tsx) ao card correspondente no Kanban, quando
+  # existir. `LeadFormLead.id` (Graph API) e `MetaLeadSubmission.leadgen_id`
+  # são o MESMO valor — confirmado comparando o path `GET /#{leadgen_id}` de
+  # `Meta::AdsManagerService#lead_detail` com o `id` que `leadgen_form_leads`
+  # devolve pra cada lead. Em lote (não 1 query por linha da tabela) e sem
+  # erro pra leadgen_id sem submission correspondente (lead histórico, ou
+  # recebido antes dessa feature existir) — só não aparece na resposta.
+  def pipeline_status_for_leads(leadgen_ids)
+    ids = leadgen_ids.compact.uniq
+    return {} if ids.empty?
+
+    submissions = MetaLeadSubmission.where(leadgen_id: ids)
+                                     .includes(pipeline_item: %i[pipeline pipeline_stage])
+
+    submissions.each_with_object({}) do |submission, memo|
+      item = submission.pipeline_item
+      memo[submission.leadgen_id] = {
+        status: submission.status,
+        contact_id: submission.contact_id,
+        pipeline_item_id: item&.id,
+        pipeline_id: item&.pipeline_id,
+        pipeline_name: item&.pipeline&.name,
+        pipeline_stage_id: item&.pipeline_stage_id,
+        pipeline_stage_name: item&.pipeline_stage&.name
+      }
+    end
+  end
 
   def respond(result)
     if result.success

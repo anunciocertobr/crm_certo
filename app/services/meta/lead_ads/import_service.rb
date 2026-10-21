@@ -59,7 +59,9 @@ module Meta
         # Meta::LeadAds::WhatsappNotifierService sobre a resolução do destino).
         Meta::LeadAds::WhatsappNotifierService.call(submission)
 
-        unless lead_form
+        pipeline, pipeline_stage = lead_form ? [lead_form.pipeline, lead_form.pipeline_stage] : default_pipeline_and_stage
+
+        unless pipeline && pipeline_stage
           submission.update!(status: 'unmapped_form') unless submission.status == 'unmapped_form'
           return
         end
@@ -75,8 +77,8 @@ module Meta
           return
         end
 
-        pipeline_item = lead_form.pipeline.pipeline_items.find_by(contact: contact, completed_at: nil) ||
-                        lead_form.pipeline.add_contact(contact, lead_form.pipeline_stage, nil)
+        pipeline_item = pipeline.pipeline_items.find_by(contact: contact, completed_at: nil) ||
+                        pipeline.add_contact(contact, pipeline_stage, nil)
 
         submission.update!(
           meta_lead_form: lead_form,
@@ -91,6 +93,22 @@ module Meta
       end
 
       private
+
+      # Padrão da conta (Configurações > Admin, tipo 'meta_leads_pipeline_default')
+      # pra formulário sem MetaLeadForm próprio — evita que o lead fique preso
+      # em 'unmapped_form' pra sempre só porque ninguém mapeou aquele
+      # formulário específico ainda. `nil, nil` quando não configurado (os
+      # dois IDs têm que existir e resolver pra registro de verdade; config
+      # pela metade não cria pipeline_item num lugar errado).
+      def default_pipeline_and_stage
+        pipeline_id = GlobalConfigService.load('META_LEADS_PIPELINE_ID', nil)
+        stage_id = GlobalConfigService.load('META_LEADS_STAGE_ID', nil)
+        return [nil, nil] if pipeline_id.blank? || stage_id.blank?
+
+        pipeline = Pipeline.find_by(id: pipeline_id)
+        stage = pipeline&.pipeline_stages&.find_by(id: stage_id)
+        [pipeline, stage]
+      end
 
       # Pergunta de telefone CUSTOM no formulário (texto livre, ex. "Qual seu
       # WhatsApp?") costuma vir só com DDD+número, sem +55 — diferente do

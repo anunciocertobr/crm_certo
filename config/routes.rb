@@ -177,7 +177,7 @@ Rails.application.routes.draw do
         get 'real_estate/agents_kanban_stats', to: 'real_estate_agents#kanban_stats'
         get 'real_estate/agents/:agent_id/leads', to: 'real_estate_agents#leads'
         resources :meta_lead_forms, only: [:index, :create, :update, :destroy]
-        resources :meta_lead_submissions, only: [:index]
+        resources :meta_lead_submissions, only: %i[index show update]
         get 'meta_lead_notification_settings', to: 'meta_lead_notification_settings#index'
         put 'meta_lead_notification_settings/:form_id', to: 'meta_lead_notification_settings#upsert'
         delete 'meta_lead_notification_settings/:form_id', to: 'meta_lead_notification_settings#destroy'
