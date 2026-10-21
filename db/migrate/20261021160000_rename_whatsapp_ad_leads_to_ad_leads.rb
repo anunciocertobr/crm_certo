@@ -12,17 +12,13 @@
 # nenhum lugar do código antes desta sessão.
 class RenameWhatsappAdLeadsToAdLeads < ActiveRecord::Migration[7.1]
   def change
+    # `rename_table` no adapter de Postgres do Rails já renomeia sozinho os
+    # índices e a sequence que seguem a convenção `index_<tabela>_on_<col>`
+    # — confirmado ao vivo (21/10): chamar `rename_index` depois disso dá
+    # "relation ... does not exist" porque o nome antigo já não existe mais
+    # (o próprio `rename_table` já tinha renomeado). Não precisa (e não
+    # pode) renomear de novo à mão.
     rename_table :whatsapp_ad_leads, :ad_leads
-
-    rename_index :ad_leads, 'index_whatsapp_ad_leads_on_campaign_id', 'index_ad_leads_on_campaign_id'
-    rename_index :ad_leads, 'index_whatsapp_ad_leads_on_contact_id', 'index_ad_leads_on_contact_id'
-    rename_index :ad_leads, 'index_whatsapp_ad_leads_on_conversation_id', 'index_ad_leads_on_conversation_id'
-    rename_index :ad_leads, 'index_whatsapp_ad_leads_on_created_at', 'index_ad_leads_on_created_at'
-    rename_index :ad_leads, 'index_whatsapp_ad_leads_on_ctwaclid', 'index_ad_leads_on_ctwaclid'
-    rename_index :ad_leads, 'index_whatsapp_ad_leads_on_enriched', 'index_ad_leads_on_enriched'
-    rename_index :ad_leads, 'index_whatsapp_ad_leads_on_message_id', 'index_ad_leads_on_message_id'
-    rename_index :ad_leads, 'index_whatsapp_ad_leads_on_platform', 'index_ad_leads_on_platform'
-    rename_index :ad_leads, 'index_whatsapp_ad_leads_on_status', 'index_ad_leads_on_status'
 
     add_column :ad_leads, :channel, :string, null: false, default: 'whatsapp'
     add_index :ad_leads, :channel
