@@ -255,6 +255,15 @@ module Guarulhos
         # se o código não existir na tabela do município); o manual marca 0-1,
         # mas a prefeitura recusa o lote sem o campo.
         elem(tipos('CodigoTributacaoMunicipio'), codigo_tributacao_municipio(invoice)),
+        # Código NBS (Nomenclatura Brasileira de Serviços) — o manual técnico
+        # oficial (v1.0, 14/10/2026, pós Reforma Tributária LC 214/2025) marca
+        # esse campo Ocorr. "1-1" (obrigatório) logo após CodigoTributacaoMunicipio
+        # e antes de Discriminacao. A nota 279 (19/10/2026) foi aceita sem ele,
+        # então a prefeitura ainda não está rejeitando por omissão — mas como
+        # CodigoTributacaoMunicipio também é "0-1" no manual e na prática já dá
+        # E202 sem ele (ver comentário acima), é prudente tratar NBS do mesmo
+        # jeito antes que vire rejeição de verdade.
+        elem(tipos('CodigoNbs'), invoice.codigo_nbs),
         elem(tipos('Discriminacao'), truncate(invoice.discriminacao, 2000)),
         elem(tipos('CodigoMunicipio'), @establishment.municipio_ibge_code),
         elem(tipos('CodigoPais'), CODIGO_PAIS_BRASIL),

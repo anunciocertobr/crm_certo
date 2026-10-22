@@ -60,6 +60,7 @@ class Api::V1::Finances::ServiceInvoicesController < Api::V1::BaseController
     params.require(:service_invoice).permit(
       :fiscal_establishment_id, :work_order_id, :tomador_nome, :tomador_cpf_cnpj,
       :tomador_email, :discriminacao, :codigo_servico_municipal,
+      :codigo_nbs, :codigo_tributacao_municipio,
       :valor_servicos, :valor_deducoes, :aliquota_iss_pct,
       tomador_endereco: %i[logradouro numero bairro codigo_municipio uf cep]
     )
@@ -72,7 +73,8 @@ class Api::V1::Finances::ServiceInvoicesController < Api::V1::BaseController
   def serialize(invoice, include_xml: false)
     fields = %i[id fiscal_establishment_id work_order_id numero_rps serie_rps numero_nfse
                 codigo_verificacao protocolo status tomador_nome tomador_cpf_cnpj tomador_email
-                tomador_endereco discriminacao codigo_servico_municipal valor_servicos
+                tomador_endereco discriminacao codigo_servico_municipal codigo_nbs
+                codigo_tributacao_municipio valor_servicos
                 aliquota_iss_pct valor_iss valor_deducoes erro_mensagem created_at updated_at]
     fields += %i[xml_envio xml_retorno] if include_xml
 
