@@ -227,7 +227,8 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     dispatch_conversation_updated_event(@pipeline_item.conversation) if stage_changed
 
     success_response(
-      data: PipelineItemSerializer.serialize(@pipeline_item.reload, include_entity: true),
+      data: PipelineItemSerializer.serialize(@pipeline_item.reload, include_entity: true)
+                                   .merge(meta_crm_warning: stage_changed ? meta_crm_setup_warning(@pipeline_item) : nil),
       message: 'Pipeline item updated successfully'
     )
   rescue ActiveRecord::RecordNotFound
@@ -374,7 +375,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
       dispatch_conversation_updated_event(@pipeline_item.conversation)
 
       success_response(
-        data: { pipeline_item: @pipeline_item.push_event_data },
+        data: { pipeline_item: @pipeline_item.push_event_data, meta_crm_warning: meta_crm_setup_warning(@pipeline_item) },
         message: 'Item moved successfully'
       )
     else
@@ -415,7 +416,7 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
     )
 
     success_response(
-      data: { pipeline_item: @pipeline_item.push_event_data },
+      data: { pipeline_item: @pipeline_item.push_event_data, meta_crm_warning: meta_crm_setup_warning(@pipeline_item) },
       message: 'Lead qualification updated successfully'
     )
   rescue ActiveRecord::RecordInvalid => e
@@ -567,6 +568,20 @@ class Api::V1::PipelineItemsController < Api::V1::BaseController
   end
 
   private
+
+  # Só avisa quando o card É de verdade um lead de formulário Meta (tem
+  # MetaLeadSubmission ligada) — pra qualquer outro card isso seria ruído
+  # sem sentido (o Conversion Leads nem se aplica). Mensagem pronta pro
+  # front mostrar como toast na hora, em vez do usuário só descobrir dias
+  # depois que nada foi enviado (ver Meta::ConversionsApiCrmService.setup_status).
+  def meta_crm_setup_warning(item)
+    return nil unless MetaLeadSubmission.exists?(pipeline_item_id: item.id)
+
+    missing = Meta::ConversionsApiCrmService.setup_status
+    return nil if missing.empty?
+
+    "Esse lead veio de formulário Meta, mas o Conversion Leads (envio de status pra Meta) não está configurado: #{missing.join(', ')}."
+  end
 
   def skip_missing_target_stage
     Rails.logger.warn(

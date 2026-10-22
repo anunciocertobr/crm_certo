@@ -45,6 +45,19 @@ module Api
           'meta_leads_pipeline_default' => %w[
             META_LEADS_PIPELINE_ID META_LEADS_STAGE_ID
           ],
+          # Meta::ConversionsApiCrmService — "Conversion Leads" / Conversions
+          # API for CRM, produto separado do 'meta_conversions' acima: manda
+          # status do lead (qualificação, estágio do funil) pra Meta usando
+          # leadgen_id como identificador, pra leads de Lead Ads/Instant Forms
+          # que não têm fbc/fbp (ver app/services/meta/conversions_api_crm_service.rb
+          # pro porquê de ser um dataset/endpoint separado do pixel de conversão
+          # normal). DATASET_ID é o "CRM dataset" criado no Events Manager
+          # (Meta trata como pixel_id); PARTNER_AGENT é a string combinada com
+          # o representante da conta Meta — nenhum dos dois tem como ser obtido
+          # por código, exige configuração manual do usuário no Business Manager.
+          'meta_conversion_leads' => %w[
+            META_CRM_ENABLED META_CRM_DATASET_ID META_CRM_PARTNER_AGENT
+          ],
           # Contatos > Contatos Google — liga/desliga Contact#auto_save_to_google_contacts
           # (ver Google::AutoSaveContactJob). A conexão OAuth em si é por
           # Integrations::Hook(app_id: 'google_workspace'), não por aqui —

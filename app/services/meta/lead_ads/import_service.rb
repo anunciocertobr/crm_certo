@@ -77,8 +77,8 @@ module Meta
           return
         end
 
-        pipeline_item = pipeline.pipeline_items.find_by(contact: contact, completed_at: nil) ||
-                        pipeline.add_contact(contact, pipeline_stage, nil)
+        existing_item = pipeline.pipeline_items.find_by(contact: contact, completed_at: nil)
+        pipeline_item = existing_item || pipeline.add_contact(contact, pipeline_stage, nil)
 
         submission.update!(
           meta_lead_form: lead_form,
@@ -87,6 +87,12 @@ module Meta
           status: 'processed',
           error_message: nil
         )
+
+        # Primeiro evento do funil pro "Conversion Leads" da Meta (ver
+        # Meta::ConversionsApiCrmService) — só no card novo de verdade, não
+        # quando reaproveita um já existente (senão reenviaria "Lead" toda
+        # vez que a mesma pessoa manda outro formulário).
+        Meta::SendCrmLeadStatusJob.perform_later(pipeline_item.id, event_name: 'Lead') if existing_item.nil?
       rescue StandardError => e
         Rails.logger.error("Meta::LeadAds::ImportService: #{e.message}")
         submission.update(status: 'error', error_message: e.message)

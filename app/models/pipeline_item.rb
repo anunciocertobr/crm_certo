@@ -89,6 +89,8 @@ class PipelineItem < ApplicationRecord
   after_update :publish_pipeline_item_completed, if: :saved_change_to_completed_at?
   after_update_commit :send_lead_quality_to_meta, if: :saved_change_to_lead_quality?
   after_update_commit :send_conversion_to_meta, if: :saved_change_to_completed_at?
+  after_update_commit :send_crm_lead_status_for_quality, if: :saved_change_to_lead_quality?
+  after_update_commit :send_crm_lead_status_for_stage, if: :saved_change_to_pipeline_stage_id?
   after_destroy :publish_pipeline_item_deleted
 
   scope :in_stage, ->(stage) { where(pipeline_stage: stage) }
@@ -527,6 +529,30 @@ class PipelineItem < ApplicationRecord
     return unless new_value.present? && old_value.blank?
 
     Meta::SendConversionJob.perform_later(id)
+  end
+
+  # "Conversion Leads" da Meta (ver Meta::ConversionsApiCrmService) — só pra
+  # cards que vieram de Lead Ads/Instant Form (o job sai sem enviar se não
+  # achar MetaLeadSubmission ligada). Qualificação e mudança de estágio são
+  # os dois sinais que o produto da Meta espera (progressão de funil);
+  # `stage_type` do novo estágio vira o nome do evento quando é
+  # completed/cancelled ("comprou"/"não comprou" — ver EditStageModal/
+  # CreateStageModal pra configurar isso no estágio), senão manda o nome do
+  # próprio estágio.
+  def send_crm_lead_status_for_quality
+    return if lead_quality.blank?
+
+    Meta::SendCrmLeadStatusJob.perform_later(id, event_name: "Qualificado (#{lead_quality})")
+  end
+
+  def send_crm_lead_status_for_stage
+    event_name = case pipeline_stage.stage_type
+                 when 'completed' then 'Convertido'
+                 when 'cancelled' then 'Perdido'
+                 else pipeline_stage.name
+                 end
+
+    Meta::SendCrmLeadStatusJob.perform_later(id, event_name: event_name)
   end
 
   public
