@@ -25,9 +25,15 @@ module Sites
     }.freeze
 
     # Chaves já no formato padrão GA4/GTM — lookup direto, sem regex.
+    # payment_method/action_source/gender/birth_date/address_* achados
+    # inspecionando a tag "Google Sheet relatorio de compra" de um cliente
+    # real (Cardápio Digital Pizzaria) no GTM — é o conjunto de campos que
+    # a planilha Google já recebe, replicado aqui pro webhook também ter.
     DIRECT_LOOKUP_KEYS = %w[
       utm_source utm_medium utm_campaign utm_term utm_content utm_id
       gclid fbclid fbp fbc ttclid msclkid
+      payment_method action_source gender birth_date
+      address_city address_state address_zip address_country
     ].freeze
 
     # Containers comuns que o GTM costuma usar pra agrupar essas variáveis
@@ -62,6 +68,9 @@ module Sites
       product_ids = extract_product_ids(payload)
       result[:product_ids] = product_ids if product_ids.present?
 
+      content_category = extract_item_field(payload, 'item_category')
+      result[:content_category] = content_category if content_category.present?
+
       result
     rescue StandardError => e
       Rails.logger.warn "Sites::WebhookPayloadParser: #{e.message}"
@@ -88,14 +97,23 @@ module Sites
     end
 
     def extract_product_ids(payload)
+      items_from(payload).filter_map do |item|
+        (item['item_id'] || item['id'] || item['sku'])&.to_s
+      end
+    end
+
+    # Categorias únicas dos itens do carrinho (`item_category`) — mesma
+    # concatenação que a tag "03 Parametro content_category" do GTM já faz
+    # pra planilha, só que como array em vez de string separada por vírgula.
+    def extract_item_field(payload, key)
+      items_from(payload).filter_map { |item| item[key] }.uniq
+    end
+
+    def items_from(payload)
       items = payload['items'] || payload.dig('ecommerce', 'items') || payload['products']
       return [] unless items.is_a?(Array)
 
-      items.first(MAX_PRODUCT_IDS).filter_map do |item|
-        next unless item.is_a?(Hash)
-
-        (item['item_id'] || item['id'] || item['sku'])&.to_s
-      end
+      items.first(MAX_PRODUCT_IDS).grep(Hash)
     end
   end
 end

@@ -8,6 +8,17 @@
 class Api::V1::Webhooks::SitesController < ActionController::API
   MAX_BODY_BYTES = 200.kilobytes
 
+  # Todo campo que Sites::WebhookPayloadParser sabe preencher — usado via
+  # `slice` pra montar o create (em vez de listar campo por campo), assim
+  # um campo novo adicionado só no parser não fica esquecido aqui.
+  PARSED_ATTRIBUTE_KEYS = %i[
+    event_name name email phone value currency transaction_id product_ids
+    content_category page_url utm_source utm_medium utm_campaign utm_term
+    utm_content utm_id gclid fbclid fbp fbc ttclid msclkid payment_method
+    action_source gender birth_date address_city address_state address_zip
+    address_country
+  ].freeze
+
   before_action :set_site!
 
   def receive
@@ -19,31 +30,12 @@ class Api::V1::Webhooks::SitesController < ActionController::API
     parsed = Sites::WebhookPayloadParser.call(payload)
 
     SiteLeadSubmission.create!(
-      site: @site,
-      event_name: parsed[:event_name],
-      name: parsed[:name],
-      email: parsed[:email],
-      phone: parsed[:phone],
-      value: parsed[:value],
-      currency: parsed[:currency],
-      transaction_id: parsed[:transaction_id],
-      product_ids: parsed[:product_ids] || [],
-      page_url: parsed[:page_url],
-      utm_source: parsed[:utm_source],
-      utm_medium: parsed[:utm_medium],
-      utm_campaign: parsed[:utm_campaign],
-      utm_term: parsed[:utm_term],
-      utm_content: parsed[:utm_content],
-      utm_id: parsed[:utm_id],
-      gclid: parsed[:gclid],
-      fbclid: parsed[:fbclid],
-      fbp: parsed[:fbp],
-      fbc: parsed[:fbc],
-      ttclid: parsed[:ttclid],
-      msclkid: parsed[:msclkid],
-      ip_address: request.remote_ip,
-      user_agent: request.user_agent,
-      raw_payload: payload
+      parsed.slice(*PARSED_ATTRIBUTE_KEYS).merge(
+        site: @site,
+        ip_address: request.remote_ip,
+        user_agent: request.user_agent,
+        raw_payload: payload
+      )
     )
 
     render json: { received: true }, status: :ok
