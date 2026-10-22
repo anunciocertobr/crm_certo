@@ -59,6 +59,15 @@ Rails.application.routes.draw do
             get :pdf
           end
         end
+        # NF-e 55 / NFC-e 65 — independente da NFS-e acima (ver
+        # GoodsInvoices::ProviderClient).
+        resources :goods_fiscal_profiles, only: %i[index create update destroy],
+                                           controller: 'finances/goods_fiscal_profiles'
+        resources :goods_invoices, only: %i[index create show], controller: 'finances/goods_invoices' do
+          member do
+            post :cancel
+          end
+        end
       end
 
       get 'marketing/gtm/accounts', to: 'marketing/gtm#accounts'
