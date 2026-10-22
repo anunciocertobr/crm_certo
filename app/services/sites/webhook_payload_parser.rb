@@ -32,8 +32,10 @@ module Sites
 
     # Containers comuns que o GTM costuma usar pra agrupar essas variáveis
     # — achata só 1 nível, não tenta adivinhar estrutura arbitrária mais
-    # funda que isso.
-    CONTAINER_KEYS = %w[ecommerce user user_data form attribution utm].freeze
+    # funda que isso. `tracking_properties` é o nome real usado pelo
+    # pushToDataLayer() do Cardápio Digital (DigitalMenuPage.tsx) — achado
+    # testando com o payload de verdade, não só um exemplo genérico.
+    CONTAINER_KEYS = %w[ecommerce user user_data form attribution utm tracking_properties].freeze
     MAX_KEYS_SCANNED = 200
     MAX_PRODUCT_IDS = 50
 
