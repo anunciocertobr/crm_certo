@@ -228,6 +228,44 @@ module Guarulhos
       override.presence || CODIGOS_TRIBUTACAO_MUNICIPIO[item_lista_servico(invoice)]
     end
 
+    # Bloco <IBSCBS> (Reforma Tributária, LC 214/2025) — confirmado pelo
+    # exemplo de XML completo do manual técnico oficial (v1.0, 14/10/2026,
+    # seção 5): fica DENTRO de <Servico><Valores>, depois de <trib>. É só
+    # classificação (finalidade/indicadores/CST/cClassTrib/base de cálculo)
+    # — o valor do IBS/CBS em si (<IBSCBSTotal>, vIBSUF/vIBSMun/vCBS) é
+    # TOTALIZADOR DEVOLVIDO PELA PREFEITURA no retorno, não algo que o
+    # emissor calcula e envia. Em 2026 esses valores ainda não entram no
+    # total da nota (fase de testes/homologação) — só a classificação já
+    # deixa a nota pronta pro schema atual.
+    #
+    # Valores default cobrem a operação comum desta empresa (venda de
+    # serviço B2B nacional, sem comércio exterior — por isso <comExt> fica
+    # de fora): finNFSe=0 (regular), indFinal=0 (não é consumo pessoal),
+    # cIndOp=000001 e CST=001/cClassTrib=010101 (tributação integral,
+    # mesmos valores do exemplo oficial do manual).
+    IBS_CBS_CST_PADRAO = '001'
+    IBS_CBS_CLASSIFICACAO_PADRAO = '010101'
+
+    def ibs_cbs_node(invoice)
+      rgrp(tipos('IBSCBS'), [
+        elem(tipos('finNFSe'), '0'),
+        elem(tipos('indFinal'), '0'),
+        elem(tipos('cIndOp'), '000001'),
+        elem(tipos('indDest'), '0'),
+        rgrp(tipos('gIBSCBS'), [
+          elem(tipos('CST'), IBS_CBS_CST_PADRAO),
+          elem(tipos('cClassTrib'), IBS_CBS_CLASSIFICACAO_PADRAO),
+          elem(tipos('cLocalidadeIncid'), @establishment.municipio_ibge_code),
+          elem(tipos('pRedutor'), '0.0000'),
+          # Base de cálculo "antes das reduções" — aproximação a partir do
+          # que o ServiceInvoice já tem (valor do serviço menos o ISS já
+          # destacado); não há bloco de PIS/COFINS detalhado nesta 1ª
+          # versão pra abater também, isso é só informativo em 2026.
+          elem(tipos('vBC'), amount(invoice.valor_servicos.to_f - invoice.valor_iss.to_f))
+        ])
+      ])
+    end
+
     def cpf_cnpj_elem(value)
       digits = value.to_s.gsub(/\D/, '')
       digits.length > 11 ? elem(tipos('Cnpj'), digits) : elem(tipos('Cpf'), digits)
@@ -247,7 +285,8 @@ module Guarulhos
           # indTotTrib=0 é o único valor aceito para "não informar".
           rgrp(tipos('trib'), [
             rgrp(tipos('totTrib'), [elem(tipos('indTotTrib'), '0')])
-          ])
+          ]),
+          ibs_cbs_node(invoice)
         ]),
         elem(tipos('IssRetido'), '2'),
         elem(tipos('ItemListaServico'), invoice.codigo_servico_municipal),
