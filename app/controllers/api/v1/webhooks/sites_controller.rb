@@ -13,10 +13,11 @@ class Api::V1::Webhooks::SitesController < ActionController::API
   # um campo novo adicionado só no parser não fica esquecido aqui.
   PARSED_ATTRIBUTE_KEYS = %i[
     event_name name email phone value currency transaction_id product_ids
-    content_category page_url utm_source utm_medium utm_campaign utm_term
-    utm_content utm_id gclid fbclid fbp fbc ttclid msclkid payment_method
-    action_source gender birth_date address_city address_state address_zip
-    address_country
+    content_category content_name content_type num_items page_url
+    utm_source utm_medium utm_campaign utm_term utm_content utm_id gclid
+    fbclid fbp fbc ttclid msclkid payment_method coupon action_source
+    gender birth_date address_city address_state address_zip
+    address_country first_name last_name external_id first_party_collection
   ].freeze
 
   before_action :set_site!
@@ -34,7 +35,8 @@ class Api::V1::Webhooks::SitesController < ActionController::API
         site: @site,
         ip_address: request.remote_ip,
         user_agent: request.user_agent,
-        raw_payload: payload
+        raw_payload: payload,
+        **customer_history_for(parsed[:phone])
       )
     )
 
@@ -49,6 +51,21 @@ class Api::V1::Webhooks::SitesController < ActionController::API
   end
 
   private
+
+  # "Quantas vezes comprou"/"valor total já comprado" (customerTotalOrders/
+  # customerTotalOrderValue na planilha) — lá vem de um campo de cliente do
+  # WooCommerce; aqui não existe conta de cliente, então calcula na hora
+  # pelas submissions anteriores DESTE site com o mesmo telefone. Sem
+  # telefone no payload, não tem como agrupar por cliente — fica de fora.
+  def customer_history_for(phone)
+    return {} if phone.blank?
+
+    previous = @site.site_lead_submissions.where(phone: phone)
+    {
+      customer_total_orders: previous.count,
+      customer_total_order_value: previous.sum(:value)
+    }
+  end
 
   def set_site!
     @site = Site.find_by(webhook_token: params[:token])

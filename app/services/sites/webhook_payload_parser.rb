@@ -34,6 +34,7 @@ module Sites
       gclid fbclid fbp fbc ttclid msclkid
       payment_method action_source gender birth_date
       address_city address_state address_zip address_country
+      content_type coupon external_id first_party_collection
     ].freeze
 
     # Containers comuns que o GTM costuma usar pra agrupar essas variáveis
@@ -70,6 +71,16 @@ module Sites
 
       content_category = extract_item_field(payload, 'item_category')
       result[:content_category] = content_category if content_category.present?
+
+      content_name = extract_item_field(payload, 'item_name')
+      result[:content_name] = content_name if content_name.present?
+
+      num_items = sum_item_quantities(payload)
+      result[:num_items] = num_items if num_items.positive?
+
+      first_name, last_name = split_name(result[:name])
+      result[:first_name] = first_name if first_name.present?
+      result[:last_name] = last_name if last_name.present?
 
       result
     rescue StandardError => e
@@ -114,6 +125,24 @@ module Sites
       return [] unless items.is_a?(Array)
 
       items.first(MAX_PRODUCT_IDS).grep(Hash)
+    end
+
+    # Mesmo cálculo que a variável "07 Parametro num_items (quantity)" do
+    # GTM já faz via JS (soma de quantity de cada item) — computado aqui em
+    # vez de esperar que o front mande um total pronto (evita divergência
+    # entre o total mandado e os itens de verdade).
+    def sum_item_quantities(payload)
+      items_from(payload).sum { |item| item['quantity'].to_i }
+    end
+
+    # A planilha usa First Name/Last Name separados (campo de cliente do
+    # WooCommerce) — esta app só coleta o nome completo, então divide no
+    # primeiro espaço em vez de pedir pro frontend mandar os dois.
+    def split_name(full_name)
+      return [nil, nil] if full_name.blank?
+
+      first, rest = full_name.to_s.strip.split(' ', 2)
+      [first, rest]
     end
   end
 end
