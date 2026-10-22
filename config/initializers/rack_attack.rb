@@ -271,6 +271,16 @@ class Rack::Attack
     end
   end
 
+  ## Site webhook ingress (Dashboards > Sites) — chamado pelo navegador de
+  ## QUALQUER visitante do site do cliente via GTM, então o tráfego real vem
+  ## de muitos IPs diferentes; a chave certa é o token (por site), não o IP.
+  ## Ceiling mais alto que ERP/purchases porque é tráfego de visitante real
+  ## (picos de campanha), não webhook de parceiro.
+  throttle('api/v1/webhooks/sites', limit: ENV.fetch('RATE_LIMIT_SITE_WEBHOOK', '120').to_i, period: 1.minute) do |req|
+    match_data = %r{\A/api/v1/webhooks/sites/([^/]+)\z}.match(req.path_without_extentions)
+    "site_webhook:#{match_data[1]}" if match_data && req.post?
+  end
+
   ## Prevent abuse of conversations history import (EVO-1557)
   ## Each request can ingest up to 50k rows; default 5 reqs/min/key.
   throttle('api/v1/conversations/import', limit: ENV.fetch('RATE_LIMIT_CONVERSATIONS_IMPORT', '5').to_i, period: 1.minute) do |req|

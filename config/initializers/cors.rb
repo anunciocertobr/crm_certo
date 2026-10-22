@@ -31,6 +31,18 @@ Rails.application.config.middleware.insert_before 0, Rack::Cors do
     resource '/api/v1/tools_proxy/*', headers: :any, methods: :any
   end
 
+  # Webhook de Site (Dashboards > Sites) — disparado pelo NAVEGADOR DO
+  # VISITANTE via uma tag do Google Tag Manager num domínio arbitrário do
+  # cliente, diferente por site cadastrado. É cross-origin de verdade
+  # (preflight incluso), ao contrário dos outros webhooks desta família
+  # (ERP/99/purchases), que são server-to-server e não passam por CORS.
+  # Autenticação é só o webhook_token no path (ver
+  # Api::V1::Webhooks::SitesController) — sem credentials aqui.
+  allow do
+    origins '*'
+    resource '/api/v1/webhooks/sites/*', headers: :any, methods: %i[post options]
+  end
+
   allow do
     origins cors_origins
 

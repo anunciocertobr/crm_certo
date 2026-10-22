@@ -479,6 +479,17 @@ Rails.application.routes.draw do
         get :leads, on: :member
       end
 
+      # Dashboards > Sites — card por URL cadastrada, com webhook próprio
+      # pra receber leads/eventos de e-commerce do Google Tag Manager do
+      # cliente (ver Api::V1::Webhooks::SitesController pro receiver público).
+      resources :sites, only: %i[index show create update destroy] do
+        member do
+          get :leads
+          get :webhook_info
+          post :regenerate_webhook_token
+        end
+      end
+
       # Chat-page builder admin CRUD (B14.08).
       resources :chat_pages, only: [:index, :create, :show, :update, :destroy], controller: 'chat_pages'
 
@@ -565,6 +576,7 @@ Rails.application.routes.draw do
         # registered payment platform becomes contact + pipeline card.
         post 'purchases/:provider', to: 'purchases#receive', as: :purchase_webhook
         post 'ninety_nine/:token', to: 'ninety_nine#receive', as: :ninety_nine_webhook
+        post 'sites/:token', to: 'sites#receive', as: :site_webhook
       end
 
       scope :ninety_nine, as: :ninety_nine do
