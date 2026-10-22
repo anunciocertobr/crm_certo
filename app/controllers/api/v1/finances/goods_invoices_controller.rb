@@ -38,7 +38,7 @@ class Api::V1::Finances::GoodsInvoicesController < Api::V1::BaseController
   def invoice_params
     params.require(:goods_invoice).permit(
       :goods_fiscal_profile_id, :work_order_id, :modelo, :natureza_operacao,
-      :destinatario_nome, :destinatario_cpf_cnpj,
+      :destinatario_nome, :destinatario_cpf_cnpj, :forma_pagamento,
       # valor_produtos/valor_total NÃO são aceitos do cliente — o
       # EmissionService recalcula os dois a partir dos itens.
       :valor_desconto, :valor_frete,
@@ -60,6 +60,7 @@ class Api::V1::Finances::GoodsInvoicesController < Api::V1::BaseController
   def serialize(invoice, include_xml: false)
     fields = %i[id goods_fiscal_profile_id work_order_id modelo numero serie natureza_operacao
                 status chave_acesso protocolo data_emissao destinatario_nome destinatario_cpf_cnpj
+                forma_pagamento
                 destinatario_endereco itens valor_produtos valor_desconto valor_frete valor_total
                 regime_tributario valor_cbs valor_ibs valor_imposto_seletivo valor_legado
                 valor_total_impostos avisos_fiscais

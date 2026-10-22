@@ -49,7 +49,11 @@ class Api::V1::Finances::GoodsFiscalProfilesController < Api::V1::BaseController
   def profile_params
     params.require(:goods_fiscal_profile).permit(
       :cnpj, :razao_social, :nome_fantasia, :uf, :inscricao_estadual, :crt,
-      :ambiente, :provider_key, :serie_nfe, :serie_nfce, :active
+      :ambiente, :provider_key, :serie_nfe, :serie_nfce, :active,
+      # Endereço do emitente — exigido pela NF-e/NFC-e (<enderEmit>) quando
+      # um provider_key de emissão real é escolhido (ver GoodsFiscalProfile).
+      :logradouro, :numero_endereco, :complemento, :bairro,
+      :codigo_municipio, :nome_municipio, :cep, :telefone
     )
   end
 
@@ -80,7 +84,8 @@ class Api::V1::Finances::GoodsFiscalProfilesController < Api::V1::BaseController
     profile.as_json(
       only: %i[id cnpj razao_social nome_fantasia uf inscricao_estadual crt ambiente
                provider_key serie_nfe numero_nfe_atual serie_nfce numero_nfce_atual
-               active certificate_expires_at created_at updated_at]
+               logradouro numero_endereco complemento bairro codigo_municipio nome_municipio
+               cep telefone active certificate_expires_at created_at updated_at]
     ).merge(configured: profile.configured?, csc_configured: profile.csc_id_encrypted.present?)
   end
 end

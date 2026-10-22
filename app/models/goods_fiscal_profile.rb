@@ -4,13 +4,17 @@
 # explícito do usuário de manter essa frente de NF-e separada da de NFS-e.
 class GoodsFiscalProfile < ApplicationRecord
   AMBIENTES = %w[homologacao producao].freeze
-  CRTS = %w[1 2 3].freeze # 1 Simples Nacional | 2 Simples excesso | 3 Normal
+  CRTS = %w[1 2 3 4].freeze # Simples | Simples excesso | Normal | MEI
 
   # Igual PROVIDER_CLIENTS de FiscalEstablishment: registro explícito
   # provider_key -> classe, nunca `constantize` direto de dado do banco.
-  # Nenhum provedor certificado contratado ainda — ver
-  # GoodsInvoices::UnconfiguredProviderClient.
-  PROVIDER_CLIENTS = {}.freeze
+  # 'sefaz_sp' é emissão DIRETA no webservice da SEFAZ-SP (sem contratar
+  # nenhum provedor terceiro, pedido explícito do usuário) — ver
+  # GoodsInvoices::SefazSp::Client. Sem provider_key escolhido, usa o stub
+  # (GoodsInvoices::UnconfiguredProviderClient).
+  PROVIDER_CLIENTS = {
+    'sefaz_sp' => 'GoodsInvoices::SefazSp::Client'
+  }.freeze
 
   encrypts :certificate_content_encrypted, :certificate_password_encrypted
   encrypts :csc_id_encrypted, :csc_token_encrypted
@@ -19,6 +23,8 @@ class GoodsFiscalProfile < ApplicationRecord
   has_many :goods_invoices, dependent: :restrict_with_error
 
   validates :cnpj, :razao_social, :uf, :inscricao_estadual, :crt, presence: true
+  validates :logradouro, :numero_endereco, :bairro, :codigo_municipio, :nome_municipio, :cep,
+            presence: true, if: -> { provider_key.present? }
   validates :cnpj, uniqueness: true
   validates :ambiente, inclusion: { in: AMBIENTES }
   validates :crt, inclusion: { in: CRTS }
