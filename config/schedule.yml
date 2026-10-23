@@ -132,6 +132,18 @@ service_invoices_poll_status_job:
   queue: scheduled_jobs
   description: 'Consulta situação de NFS-e em processamento nos webservices municipais'
 
+service_invoices_schedule_notification_job:
+  cron: '*/15 * * * *'
+  class: 'ServiceInvoices::ScheduleNotificationJob'
+  queue: scheduled_jobs
+  description: 'Notifica (WhatsApp/Telegram/CRM) antes de emitir uma NFS-e agendada recorrente'
+
+service_invoices_schedule_emission_job:
+  cron: '*/10 * * * *'
+  class: 'ServiceInvoices::ScheduleEmissionJob'
+  queue: scheduled_jobs
+  description: 'Emite NFS-e agendadas já confirmadas e marca como sem resposta as que passaram do prazo'
+
 # executed daily at 0500 UTC (0200 no horário de Brasília) — calcula o
 # gasto/resultado real de ontem por cliente/objetivo (Marketing > Metas de
 # Clientes) contra a margem de custo aceita, pra alimentar o aviso de

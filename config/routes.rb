@@ -68,6 +68,21 @@ Rails.application.routes.draw do
             post :cancel
           end
         end
+        # Bot de emissão recorrente de NFS-e (confirmação por chat/CRM antes
+        # de emitir) — ver ServiceInvoices::ScheduleNotificationJob.
+        resources :service_invoice_schedules, only: %i[index create update destroy],
+                                               controller: 'finances/service_invoice_schedules'
+        resources :service_invoice_schedule_confirmations, only: [],
+                                                             controller: 'finances/service_invoice_schedule_confirmations' do
+          collection do
+            get :pending
+          end
+          member do
+            post :confirm
+            post :decline
+            post :edit_and_confirm
+          end
+        end
       end
 
       get 'marketing/gtm/accounts', to: 'marketing/gtm#accounts'
