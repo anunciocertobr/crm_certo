@@ -126,6 +126,21 @@ ifood_poll_events_job:
   queue: scheduled_jobs
   description: 'Keep the iFood integration connected by polling order events regularly'
 
+# Mercado Livre/Shopee não têm o requisito de heartbeat do iFood (a loja não
+# fecha por falta de polling) — intervalo menos agressivo, só pra manter a
+# lista de pedidos atualizada.
+mercado_livre_sync_orders_job:
+  cron: '*/5 * * * *'
+  class: 'MercadoLivre::SyncOrdersJob'
+  queue: scheduled_jobs
+  description: 'Sincroniza pedidos recebidos no Mercado Livre'
+
+shopee_sync_orders_job:
+  cron: '*/5 * * * *'
+  class: 'Shopee::SyncOrdersJob'
+  queue: scheduled_jobs
+  description: 'Sincroniza pedidos recebidos na Shopee'
+
 service_invoices_poll_status_job:
   cron: '*/5 * * * *'
   class: 'ServiceInvoices::PollStatusJob'

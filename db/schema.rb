@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
+ActiveRecord::Schema[7.1].define(version: 2026_10_23_152439) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -71,6 +71,59 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.uuid "blob_id", null: false
     t.string "variation_digest", null: false
     t.index ["blob_id", "variation_digest"], name: "index_active_storage_variant_records_uniqueness", unique: true
+  end
+
+  create_table "ad_leads", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "contact_id", null: false
+    t.uuid "conversation_id"
+    t.uuid "message_id"
+    t.string "platform", default: "meta", null: false
+    t.string "ctwaclid"
+    t.string "gclid"
+    t.string "source_id"
+    t.string "source_url"
+    t.string "source_type"
+    t.string "headline"
+    t.text "body"
+    t.string "media_type"
+    t.string "thumbnail_url"
+    t.string "campaign_id"
+    t.string "campaign_name"
+    t.string "adset_id"
+    t.string "adset_name"
+    t.string "ad_id"
+    t.string "ad_name"
+    t.string "utm_source"
+    t.string "utm_medium"
+    t.string "utm_campaign"
+    t.string "utm_term"
+    t.string "utm_content"
+    t.string "status", default: "novo", null: false
+    t.decimal "valor_venda", precision: 12, scale: 2
+    t.boolean "enriched", default: false, null: false
+    t.datetime "enriched_at"
+    t.jsonb "raw_referral", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "channel", default: "whatsapp", null: false
+    t.string "ttclid"
+    t.string "igclid"
+    t.string "mesengerclid"
+    t.string "fbp"
+    t.string "fbc"
+    t.string "utm_id"
+    t.string "externalid"
+    t.string "msclkid"
+    t.index ["campaign_id"], name: "index_ad_leads_on_campaign_id"
+    t.index ["channel"], name: "index_ad_leads_on_channel"
+    t.index ["contact_id"], name: "index_ad_leads_on_contact_id"
+    t.index ["conversation_id"], name: "index_ad_leads_on_conversation_id"
+    t.index ["created_at"], name: "index_ad_leads_on_created_at"
+    t.index ["ctwaclid"], name: "index_ad_leads_on_ctwaclid"
+    t.index ["enriched"], name: "index_ad_leads_on_enriched"
+    t.index ["message_id"], name: "index_ad_leads_on_message_id"
+    t.index ["platform"], name: "index_ad_leads_on_platform"
+    t.index ["status"], name: "index_ad_leads_on_status"
   end
 
   create_table "agent_bot_inboxes", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -517,6 +570,139 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.index ["waiting_since"], name: "index_conversations_on_waiting_since"
   end
 
+  create_table "course_enrollments", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "course_id", null: false
+    t.uuid "user_id", null: false
+    t.string "status", default: "active", null: false
+    t.string "source", default: "free", null: false
+    t.uuid "last_lesson_id"
+    t.decimal "progress_percent", precision: 5, scale: 2, default: "0.0", null: false
+    t.datetime "started_at", null: false
+    t.datetime "last_watched_at"
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["course_id", "user_id"], name: "index_course_enrollments_on_course_id_and_user_id", unique: true
+    t.index ["last_lesson_id"], name: "index_course_enrollments_on_last_lesson_id"
+    t.index ["last_watched_at"], name: "index_course_enrollments_on_last_watched_at"
+    t.index ["user_id"], name: "index_course_enrollments_on_user_id"
+  end
+
+  create_table "course_lessons", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "course_module_id", null: false
+    t.uuid "course_id", null: false
+    t.string "title", null: false
+    t.text "description"
+    t.integer "position", default: 0, null: false
+    t.string "video_provider"
+    t.string "video_id"
+    t.string "video_url"
+    t.integer "duration_seconds", default: 0, null: false
+    t.boolean "is_preview", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["course_id"], name: "index_course_lessons_on_course_id"
+    t.index ["course_module_id", "position"], name: "index_course_lessons_on_course_module_id_and_position"
+    t.index ["course_module_id"], name: "index_course_lessons_on_course_module_id"
+  end
+
+  create_table "course_modules", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "course_id", null: false
+    t.string "title", null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["course_id", "position"], name: "index_course_modules_on_course_id_and_position"
+    t.index ["course_id"], name: "index_course_modules_on_course_id"
+  end
+
+  create_table "course_purchase_requests", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "course_id", null: false
+    t.uuid "user_id", null: false
+    t.integer "price_cents", null: false
+    t.string "currency", default: "BRL", null: false
+    t.string "status", default: "pending", null: false
+    t.string "payment_method", default: "pix", null: false
+    t.text "note"
+    t.uuid "decided_by_id"
+    t.datetime "decided_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["course_id", "status"], name: "index_course_purchase_requests_on_course_id_and_status"
+    t.index ["course_id", "user_id"], name: "index_course_purchase_requests_pending_unique", unique: true, where: "((status)::text = 'pending'::text)"
+    t.index ["user_id"], name: "index_course_purchase_requests_on_user_id"
+  end
+
+  create_table "course_wishlists", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "user_id", null: false
+    t.uuid "course_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["course_id"], name: "index_course_wishlists_on_course_id"
+    t.index ["user_id", "course_id"], name: "index_course_wishlists_on_user_id_and_course_id", unique: true
+  end
+
+  create_table "courses", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "creator_profile_id", null: false
+    t.string "slug", null: false
+    t.string "title", null: false
+    t.string "subtitle"
+    t.text "description"
+    t.string "category"
+    t.string "level", default: "iniciante", null: false
+    t.string "thumbnail_url"
+    t.string "trailer_provider"
+    t.string "trailer_video_id"
+    t.string "trailer_url"
+    t.integer "price_cents", default: 0, null: false
+    t.string "currency", default: "BRL", null: false
+    t.string "status", default: "draft", null: false
+    t.datetime "published_at"
+    t.integer "lessons_count", default: 0, null: false
+    t.integer "duration_seconds", default: 0, null: false
+    t.integer "students_count", default: 0, null: false
+    t.integer "rating_count", default: 0, null: false
+    t.decimal "rating_average", precision: 3, scale: 2, default: "0.0", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["category"], name: "index_courses_on_category"
+    t.index ["creator_profile_id"], name: "index_courses_on_creator_profile_id"
+    t.index ["published_at"], name: "index_courses_on_published_at"
+    t.index ["slug"], name: "index_courses_on_slug", unique: true
+    t.index ["status"], name: "index_courses_on_status"
+  end
+
+  create_table "creator_follows", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "user_id", null: false
+    t.uuid "creator_profile_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["creator_profile_id"], name: "index_creator_follows_on_creator_profile_id"
+    t.index ["user_id", "creator_profile_id"], name: "index_creator_follows_on_user_id_and_creator_profile_id", unique: true
+  end
+
+  create_table "creator_profiles", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "user_id", null: false
+    t.string "slug", null: false
+    t.string "display_name", null: false
+    t.string "headline"
+    t.text "bio"
+    t.string "avatar_url"
+    t.string "banner_url"
+    t.string "whatsapp"
+    t.string "pix_key"
+    t.boolean "is_published", default: false, null: false
+    t.datetime "published_at"
+    t.integer "courses_count", default: 0, null: false
+    t.integer "followers_count", default: 0, null: false
+    t.integer "students_count", default: 0, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["is_published"], name: "index_creator_profiles_on_is_published"
+    t.index ["slug"], name: "index_creator_profiles_on_slug", unique: true
+    t.index ["user_id"], name: "index_creator_profiles_on_user_id", unique: true
+  end
+
   create_table "crm_forms", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "name", limit: 255, null: false
     t.string "slug", limit: 255, null: false
@@ -913,6 +1099,38 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.index ["work_order_id"], name: "index_financial_transactions_on_work_order_id", unique: true
   end
 
+  create_table "fiscal_establishments", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "municipio_ibge_code", limit: 20, null: false
+    t.string "municipio_nome", limit: 255, null: false
+    t.string "uf", limit: 2, null: false
+    t.string "inscricao_municipal", limit: 30, null: false
+    t.string "cnae_override", limit: 20
+    t.decimal "aliquota_iss_pct", precision: 5, scale: 2, null: false
+    t.string "ambiente", limit: 20, default: "homologacao", null: false
+    t.string "provider_key", limit: 50, null: false
+    t.text "certificate_content_encrypted"
+    t.text "certificate_password_encrypted"
+    t.date "certificate_expires_at"
+    t.string "rps_serie", limit: 10, default: "1", null: false
+    t.integer "rps_numero_atual", default: 0, null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["municipio_ibge_code"], name: "index_fiscal_establishments_on_municipio_ibge_code", unique: true
+    t.index ["provider_key"], name: "index_fiscal_establishments_on_provider_key"
+  end
+
+  create_table "fiscal_tomadores", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "nome", limit: 255, null: false
+    t.string "cpf_cnpj", limit: 20, null: false
+    t.string "email", limit: 255
+    t.jsonb "endereco", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["cpf_cnpj"], name: "index_fiscal_tomadores_on_cpf_cnpj", unique: true
+    t.index ["nome"], name: "index_fiscal_tomadores_on_nome"
+  end
+
   create_table "gestor_posts_uploads", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "created_by", null: false
     t.text "caption"
@@ -927,12 +1145,87 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.index ["status"], name: "index_gestor_posts_uploads_on_status"
   end
 
+  create_table "goods_fiscal_profiles", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "cnpj", null: false
+    t.string "razao_social", null: false
+    t.string "nome_fantasia"
+    t.string "uf", limit: 2, null: false
+    t.string "inscricao_estadual", null: false
+    t.string "crt", default: "1", null: false
+    t.string "ambiente", default: "homologacao", null: false
+    t.text "certificate_content_encrypted"
+    t.text "certificate_password_encrypted"
+    t.date "certificate_expires_at"
+    t.text "csc_id_encrypted"
+    t.text "csc_token_encrypted"
+    t.string "provider_key"
+    t.text "provider_api_key_encrypted"
+    t.string "serie_nfe", default: "1", null: false
+    t.integer "numero_nfe_atual", default: 0, null: false
+    t.string "serie_nfce", default: "1", null: false
+    t.integer "numero_nfce_atual", default: 0, null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "logradouro"
+    t.string "numero_endereco"
+    t.string "complemento"
+    t.string "bairro"
+    t.string "codigo_municipio"
+    t.string "nome_municipio"
+    t.string "cep"
+    t.string "telefone"
+    t.index ["cnpj"], name: "index_goods_fiscal_profiles_on_cnpj", unique: true
+  end
+
+  create_table "goods_invoices", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "goods_fiscal_profile_id", null: false
+    t.uuid "work_order_id"
+    t.string "modelo", null: false
+    t.string "numero", null: false
+    t.string "serie", null: false
+    t.string "natureza_operacao", default: "Venda de mercadoria", null: false
+    t.string "status", default: "pending", null: false
+    t.string "chave_acesso"
+    t.string "protocolo"
+    t.datetime "data_emissao"
+    t.string "destinatario_nome"
+    t.string "destinatario_cpf_cnpj"
+    t.jsonb "destinatario_endereco", default: {}
+    t.jsonb "itens", default: [], null: false
+    t.decimal "valor_produtos", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "valor_desconto", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "valor_frete", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "valor_total", precision: 15, scale: 2, default: "0.0", null: false
+    t.string "regime_tributario"
+    t.decimal "valor_cbs", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "valor_ibs", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "valor_imposto_seletivo", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "valor_legado", precision: 15, scale: 2, default: "0.0", null: false
+    t.decimal "valor_total_impostos", precision: 15, scale: 2, default: "0.0", null: false
+    t.jsonb "avisos_fiscais", default: [], null: false
+    t.text "xml_envio"
+    t.text "xml_retorno"
+    t.text "erro_mensagem"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "forma_pagamento", default: "01", null: false
+    t.index ["chave_acesso"], name: "index_goods_invoices_on_chave_acesso"
+    t.index ["goods_fiscal_profile_id", "serie", "numero", "modelo"], name: "idx_goods_invoices_numeracao", unique: true
+    t.index ["goods_fiscal_profile_id"], name: "index_goods_invoices_on_goods_fiscal_profile_id"
+    t.index ["status"], name: "index_goods_invoices_on_status"
+    t.index ["work_order_id"], name: "index_goods_invoices_on_work_order_id"
+  end
+
   create_table "google_ads_assets", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "kind", null: false
     t.string "name", null: false
     t.jsonb "payload", default: {}, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.datetime "published_at"
+    t.jsonb "google_resource_names", default: [], null: false
+    t.string "google_customer_id"
     t.index ["kind", "name"], name: "index_google_ads_assets_on_kind_and_name", unique: true
     t.index ["kind"], name: "index_google_ads_assets_on_kind"
   end
@@ -1061,6 +1354,28 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.index ["title"], name: "index_labels_on_title", unique: true
   end
 
+  create_table "lesson_progresses", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "course_enrollment_id", null: false
+    t.uuid "course_lesson_id", null: false
+    t.integer "position_seconds", default: 0, null: false
+    t.boolean "completed", default: false, null: false
+    t.datetime "completed_at"
+    t.datetime "last_watched_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["course_enrollment_id", "course_lesson_id"], name: "index_lesson_progresses_on_enrollment_and_lesson", unique: true
+    t.index ["course_lesson_id"], name: "index_lesson_progresses_on_course_lesson_id"
+  end
+
+  create_table "location_groups", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "ad_account_id", null: false
+    t.string "name", null: false
+    t.jsonb "pins", default: [], null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["ad_account_id"], name: "index_location_groups_on_ad_account_id"
+  end
+
   create_table "macro_executions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "macro_id", null: false
     t.uuid "conversation_id", null: false
@@ -1146,6 +1461,22 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.index ["user_id"], name: "index_menu_configs_on_user_id"
   end
 
+  create_table "mercado_livre_orders", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "ml_order_id", limit: 100, null: false
+    t.string "status", limit: 30, default: "confirmed", null: false
+    t.string "customer_name", limit: 255
+    t.string "customer_phone", limit: 40
+    t.decimal "total_price", precision: 10, scale: 2, default: "0.0", null: false
+    t.jsonb "items", default: [], null: false
+    t.jsonb "raw_payload", default: {}, null: false
+    t.datetime "placed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["ml_order_id"], name: "index_mercado_livre_orders_on_ml_order_id", unique: true
+    t.index ["placed_at"], name: "index_mercado_livre_orders_on_placed_at"
+    t.index ["status"], name: "index_mercado_livre_orders_on_status"
+  end
+
   create_table "message_templates", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "channel_type"
     t.uuid "channel_id"
@@ -1205,6 +1536,70 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.index ["source_id"], name: "index_messages_on_source_id"
   end
 
+  create_table "meta_billing_sessions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "lock_key", default: "singleton", null: false
+    t.string "status", default: "idle", null: false
+    t.text "cookies_encrypted"
+    t.datetime "cookies_imported_at"
+    t.datetime "last_verified_at"
+    t.text "last_error"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["lock_key"], name: "index_meta_billing_sessions_on_lock_key", unique: true
+  end
+
+  create_table "meta_lead_forms", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "page_id", null: false
+    t.string "form_id", null: false
+    t.string "form_name"
+    t.uuid "pipeline_id", null: false
+    t.uuid "pipeline_stage_id", null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["form_id"], name: "index_meta_lead_forms_on_form_id", unique: true
+    t.index ["page_id"], name: "index_meta_lead_forms_on_page_id"
+  end
+
+  create_table "meta_lead_notification_settings", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "page_id"
+    t.string "form_id", null: false
+    t.string "form_name"
+    t.boolean "enabled", default: true, null: false
+    t.uuid "inbox_id"
+    t.string "whatsapp_number"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "channels", default: [], null: false
+    t.jsonb "content_sections"
+    t.index ["form_id"], name: "index_meta_lead_notification_settings_on_form_id", unique: true
+  end
+
+  create_table "meta_lead_submissions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "leadgen_id", null: false
+    t.uuid "meta_lead_form_id"
+    t.string "page_id"
+    t.string "form_id"
+    t.string "ad_id"
+    t.string "adset_id"
+    t.string "campaign_id"
+    t.string "ad_name"
+    t.string "adset_name"
+    t.string "campaign_name"
+    t.jsonb "field_data", default: [], null: false
+    t.datetime "lead_created_time"
+    t.string "status", default: "unmapped_form", null: false
+    t.text "error_message"
+    t.uuid "contact_id"
+    t.uuid "pipeline_item_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.datetime "notified_whatsapp_at"
+    t.index ["form_id"], name: "index_meta_lead_submissions_on_form_id"
+    t.index ["leadgen_id"], name: "index_meta_lead_submissions_on_leadgen_id", unique: true
+    t.index ["status"], name: "index_meta_lead_submissions_on_status"
+  end
+
   create_table "motoboy_deliveries", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "motoboy_id", null: false
     t.string "order_external_id", null: false
@@ -1232,6 +1627,21 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.datetime "updated_at", null: false
     t.index ["active"], name: "index_motoboys_on_active"
     t.index ["status"], name: "index_motoboys_on_status"
+  end
+
+  create_table "ninety_nine_orders", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "external_order_id", limit: 100
+    t.string "status", limit: 30
+    t.string "customer_name", limit: 255
+    t.string "customer_phone", limit: 40
+    t.decimal "total_price", precision: 10, scale: 2
+    t.jsonb "items", default: [], null: false
+    t.jsonb "raw_payload", default: {}, null: false
+    t.datetime "received_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["external_order_id"], name: "index_ninety_nine_orders_on_external_order_id"
+    t.index ["received_at"], name: "index_ninety_nine_orders_on_received_at"
   end
 
   create_table "notes", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -1357,12 +1767,18 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.datetime "created_at", precision: nil, null: false
     t.datetime "updated_at", precision: nil, null: false
     t.uuid "contact_id"
+    t.string "lead_quality"
+    t.integer "lead_score"
+    t.text "lead_objection"
+    t.text "lead_observation"
+    t.datetime "lead_qualified_at"
     t.index "(((custom_fields -> 'lead_metadata'::text) ->> 'form_slug'::text))", name: "index_pipeline_items_on_lead_form_slug", where: "(((custom_fields -> 'lead_metadata'::text) ->> 'form_slug'::text) IS NOT NULL)"
     t.index "pipeline_id, (((custom_fields -> 'purchase'::text) ->> 'provider'::text)), (((custom_fields -> 'purchase'::text) ->> 'purchase_id'::text))", name: "index_pipeline_items_on_purchase_identity", unique: true, where: "(((custom_fields -> 'purchase'::text) ->> 'purchase_id'::text) IS NOT NULL)"
     t.index ["contact_id", "pipeline_id"], name: "idx_pipeline_items_active_contact_per_pipeline", unique: true, where: "((conversation_id IS NULL) AND (completed_at IS NULL))"
     t.index ["contact_id"], name: "index_pipeline_items_on_contact_id"
     t.index ["conversation_id", "pipeline_id"], name: "idx_pipeline_items_active_conversation_per_pipeline", unique: true, where: "((conversation_id IS NOT NULL) AND (completed_at IS NULL))"
     t.index ["custom_fields"], name: "index_pipeline_items_on_custom_fields", using: :gin
+    t.index ["lead_quality"], name: "index_pipeline_items_on_lead_quality"
     t.index ["pipeline_id"], name: "index_pipeline_items_on_pipeline_id"
     t.index ["pipeline_stage_id"], name: "index_pipeline_items_on_pipeline_stage_id"
   end
@@ -1554,10 +1970,20 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.decimal "reducao_ibs_cbs_pct", precision: 5, scale: 2
     t.boolean "sujeito_imposto_seletivo", default: false, null: false
     t.decimal "aliquota_imposto_seletivo_pct", precision: 5, scale: 2
+    t.string "ml_item_id", limit: 50
+    t.datetime "ml_published_at"
+    t.text "ml_sync_error"
+    t.boolean "publish_shopee", default: false, null: false
+    t.string "shopee_category_id", limit: 50
+    t.string "shopee_item_id", limit: 50
+    t.datetime "shopee_published_at"
+    t.text "shopee_sync_error"
     t.index ["item_type"], name: "index_products_on_item_type"
     t.index ["kind"], name: "index_products_on_kind"
     t.index ["metadata"], name: "index_products_on_metadata", using: :gin
+    t.index ["ml_item_id"], name: "index_products_on_ml_item_id"
     t.index ["ncm"], name: "index_products_on_ncm"
+    t.index ["shopee_item_id"], name: "index_products_on_shopee_item_id"
     t.index ["sku"], name: "index_products_on_sku", unique: true, where: "(sku IS NOT NULL)"
     t.index ["status"], name: "index_products_on_status"
     t.index ["supplier"], name: "index_products_on_supplier"
@@ -1591,6 +2017,20 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.index ["accounting_mode"], name: "index_recurring_transactions_on_accounting_mode"
     t.index ["active"], name: "index_recurring_transactions_on_active"
     t.index ["kind"], name: "index_recurring_transactions_on_kind"
+  end
+
+  create_table "report_snapshots", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "token", null: false
+    t.string "report_type", null: false
+    t.string "title"
+    t.jsonb "data", default: {}, null: false
+    t.datetime "expires_at", null: false
+    t.datetime "revoked_at"
+    t.uuid "created_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["expires_at"], name: "index_report_snapshots_on_expires_at"
+    t.index ["token"], name: "index_report_snapshots_on_token", unique: true
   end
 
   create_table "reporting_events", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -1744,6 +2184,88 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.index ["status"], name: "index_scheduled_posts_on_status"
   end
 
+  create_table "service_invoice_schedule_confirmations", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "service_invoice_schedule_id", null: false
+    t.datetime "scheduled_for", null: false
+    t.string "status", default: "pending_notification", null: false
+    t.jsonb "overrides", default: {}, null: false
+    t.jsonb "conversation_ids", default: {}, null: false
+    t.string "pending_edit_field"
+    t.datetime "notified_at"
+    t.datetime "responded_at"
+    t.uuid "service_invoice_id"
+    t.text "erro_mensagem"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["service_invoice_id"], name: "idx_on_service_invoice_id_3e986f5b18"
+    t.index ["service_invoice_schedule_id", "scheduled_for"], name: "idx_siv_schedule_confirmations_ciclo", unique: true
+    t.index ["service_invoice_schedule_id"], name: "idx_on_service_invoice_schedule_id_e2bf74fb7a"
+    t.index ["status"], name: "index_service_invoice_schedule_confirmations_on_status"
+  end
+
+  create_table "service_invoice_schedules", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "fiscal_establishment_id", null: false
+    t.string "tomador_nome", null: false
+    t.string "tomador_cpf_cnpj", null: false
+    t.string "tomador_email"
+    t.jsonb "tomador_endereco", default: {}, null: false
+    t.text "discriminacao", null: false
+    t.string "codigo_servico_municipal", null: false
+    t.string "codigo_nbs", null: false
+    t.string "codigo_tributacao_municipio"
+    t.decimal "valor_servicos", precision: 10, scale: 2, null: false
+    t.decimal "valor_deducoes", precision: 10, scale: 2, default: "0.0", null: false
+    t.decimal "aliquota_iss_pct", precision: 5, scale: 2
+    t.string "recurrence_type", default: "monthly", null: false
+    t.integer "day_of_month"
+    t.integer "day_of_week"
+    t.datetime "next_run_at", null: false
+    t.integer "notify_before_value", default: 1, null: false
+    t.string "notify_before_unit", default: "days", null: false
+    t.jsonb "channels", default: [], null: false
+    t.string "notify_whatsapp_number"
+    t.string "notify_telegram_chat_id"
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["active"], name: "index_service_invoice_schedules_on_active"
+    t.index ["fiscal_establishment_id"], name: "index_service_invoice_schedules_on_fiscal_establishment_id"
+    t.index ["next_run_at"], name: "index_service_invoice_schedules_on_next_run_at"
+  end
+
+  create_table "service_invoices", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "fiscal_establishment_id", null: false
+    t.uuid "work_order_id"
+    t.string "numero_rps", limit: 20, null: false
+    t.string "serie_rps", limit: 10, null: false
+    t.string "numero_nfse", limit: 30
+    t.string "codigo_verificacao", limit: 50
+    t.string "protocolo", limit: 50
+    t.string "status", limit: 20, default: "pending", null: false
+    t.string "tomador_nome", limit: 255, null: false
+    t.string "tomador_cpf_cnpj", limit: 20, null: false
+    t.string "tomador_email", limit: 255
+    t.jsonb "tomador_endereco", default: {}, null: false
+    t.text "discriminacao", null: false
+    t.string "codigo_servico_municipal", limit: 20, null: false
+    t.decimal "valor_servicos", precision: 10, scale: 2, null: false
+    t.decimal "aliquota_iss_pct", precision: 5, scale: 2, null: false
+    t.decimal "valor_iss", precision: 10, scale: 2, null: false
+    t.decimal "valor_deducoes", precision: 10, scale: 2, default: "0.0", null: false
+    t.text "xml_envio"
+    t.text "xml_retorno"
+    t.text "erro_mensagem"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "codigo_nbs"
+    t.string "codigo_tributacao_municipio"
+    t.index ["fiscal_establishment_id", "serie_rps", "numero_rps"], name: "idx_service_invoices_on_rps", unique: true
+    t.index ["fiscal_establishment_id"], name: "index_service_invoices_on_fiscal_establishment_id"
+    t.index ["numero_nfse"], name: "index_service_invoices_on_numero_nfse"
+    t.index ["status"], name: "index_service_invoices_on_status"
+    t.index ["work_order_id"], name: "index_service_invoices_on_work_order_id"
+  end
+
   create_table "sessions", primary_key: ["app_name", "user_id", "id"], force: :cascade do |t|
     t.string "app_name", limit: 128, null: false
     t.string "user_id", limit: 128, null: false
@@ -1767,6 +2289,86 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.datetime "updated_at", null: false
     t.datetime "onboarding_pushed_at"
     t.index ["user_id"], name: "index_setup_survey_responses_on_user_id", unique: true
+  end
+
+  create_table "shopee_orders", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "shopee_order_sn", limit: 100, null: false
+    t.string "status", limit: 30, default: "UNPAID", null: false
+    t.string "customer_name", limit: 255
+    t.string "customer_phone", limit: 40
+    t.decimal "total_price", precision: 10, scale: 2, default: "0.0", null: false
+    t.jsonb "items", default: [], null: false
+    t.jsonb "raw_payload", default: {}, null: false
+    t.datetime "placed_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["placed_at"], name: "index_shopee_orders_on_placed_at"
+    t.index ["shopee_order_sn"], name: "index_shopee_orders_on_shopee_order_sn", unique: true
+    t.index ["status"], name: "index_shopee_orders_on_status"
+  end
+
+  create_table "site_lead_submissions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "site_id"
+    t.string "event_name"
+    t.string "name"
+    t.string "email"
+    t.string "phone"
+    t.decimal "value", precision: 12, scale: 2
+    t.string "currency"
+    t.string "transaction_id"
+    t.jsonb "product_ids", default: [], null: false
+    t.string "page_url"
+    t.string "utm_source"
+    t.string "utm_medium"
+    t.string "utm_campaign"
+    t.string "utm_term"
+    t.string "utm_content"
+    t.string "utm_id"
+    t.string "gclid"
+    t.string "fbclid"
+    t.string "fbp"
+    t.string "fbc"
+    t.string "ttclid"
+    t.string "msclkid"
+    t.string "ip_address"
+    t.string "user_agent"
+    t.jsonb "raw_payload", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "content_category", default: [], null: false
+    t.string "payment_method"
+    t.string "action_source"
+    t.string "gender"
+    t.string "birth_date"
+    t.string "address_city"
+    t.string "address_state"
+    t.string "address_zip"
+    t.string "address_country"
+    t.jsonb "content_name", default: [], null: false
+    t.string "content_type"
+    t.integer "num_items"
+    t.string "coupon"
+    t.string "first_name"
+    t.string "last_name"
+    t.string "external_id"
+    t.string "first_party_collection"
+    t.integer "customer_total_orders"
+    t.decimal "customer_total_order_value", precision: 12, scale: 2
+    t.index ["created_at"], name: "index_site_lead_submissions_on_created_at"
+    t.index ["event_name"], name: "index_site_lead_submissions_on_event_name"
+    t.index ["site_id"], name: "index_site_lead_submissions_on_site_id"
+  end
+
+  create_table "sites", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "url", null: false
+    t.string "name"
+    t.string "hostname"
+    t.string "webhook_token"
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["hostname"], name: "index_sites_on_hostname"
+    t.index ["webhook_token"], name: "index_sites_on_webhook_token", unique: true
   end
 
   create_table "stage_inactivity_executions", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -1795,6 +2397,16 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.datetime "created_at", precision: nil, null: false
     t.datetime "updated_at", precision: nil, null: false
     t.index ["pipeline_item_id"], name: "index_stage_movements_on_pipeline_item_id"
+  end
+
+  create_table "student_course_unlocks", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.uuid "user_id", null: false
+    t.string "password_digest", null: false
+    t.integer "failed_attempts", default: 0, null: false
+    t.datetime "last_unlocked_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["user_id"], name: "index_student_course_unlocks_on_user_id", unique: true
   end
 
   create_table "taggings", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
@@ -1947,49 +2559,6 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
     t.index ["url"], name: "index_webhooks_on_url", unique: true
   end
 
-  create_table "whatsapp_ad_leads", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
-    t.uuid "contact_id", null: false
-    t.uuid "conversation_id"
-    t.uuid "message_id"
-    t.string "platform", default: "meta", null: false
-    t.string "ctwaclid"
-    t.string "gclid"
-    t.string "source_id"
-    t.string "source_url"
-    t.string "source_type"
-    t.string "headline"
-    t.text "body"
-    t.string "media_type"
-    t.string "thumbnail_url"
-    t.string "campaign_id"
-    t.string "campaign_name"
-    t.string "adset_id"
-    t.string "adset_name"
-    t.string "ad_id"
-    t.string "ad_name"
-    t.string "utm_source"
-    t.string "utm_medium"
-    t.string "utm_campaign"
-    t.string "utm_term"
-    t.string "utm_content"
-    t.string "status", default: "novo", null: false
-    t.decimal "valor_venda", precision: 12, scale: 2
-    t.boolean "enriched", default: false, null: false
-    t.datetime "enriched_at"
-    t.jsonb "raw_referral", default: {}, null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["campaign_id"], name: "index_whatsapp_ad_leads_on_campaign_id"
-    t.index ["contact_id"], name: "index_whatsapp_ad_leads_on_contact_id"
-    t.index ["conversation_id"], name: "index_whatsapp_ad_leads_on_conversation_id"
-    t.index ["created_at"], name: "index_whatsapp_ad_leads_on_created_at"
-    t.index ["ctwaclid"], name: "index_whatsapp_ad_leads_on_ctwaclid"
-    t.index ["enriched"], name: "index_whatsapp_ad_leads_on_enriched"
-    t.index ["message_id"], name: "index_whatsapp_ad_leads_on_message_id"
-    t.index ["platform"], name: "index_whatsapp_ad_leads_on_platform"
-    t.index ["status"], name: "index_whatsapp_ad_leads_on_status"
-  end
-
   create_table "work_orders", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.string "os_number", limit: 50, null: false
     t.string "status", limit: 20, default: "open", null: false
@@ -2069,6 +2638,9 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
   add_foreign_key "access_tokens", "users", column: "issued_id"
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "ad_leads", "contacts"
+  add_foreign_key "ad_leads", "conversations"
+  add_foreign_key "ad_leads", "messages"
   add_foreign_key "agent_bot_inboxes", "agent_bots", column: "facebook_comment_agent_bot_id", on_delete: :nullify
   add_foreign_key "ai_agent_products", "products", on_delete: :cascade
   add_foreign_key "automation_rule_runs", "automation_rules", on_delete: :cascade
@@ -2086,11 +2658,19 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
   add_foreign_key "evo_core_folder_shares", "evo_core_folders", column: "folder_id", name: "evo_core_folder_shares_folder_id_fkey", on_delete: :cascade
   add_foreign_key "facebook_comment_moderations", "conversations"
   add_foreign_key "facebook_comment_moderations", "messages"
+  add_foreign_key "goods_invoices", "goods_fiscal_profiles"
+  add_foreign_key "goods_invoices", "work_orders"
   add_foreign_key "macro_executions", "conversations"
   add_foreign_key "macro_executions", "macros"
   add_foreign_key "macro_executions", "users"
   add_foreign_key "marketing_goal_daily_statuses", "marketing_client_goals"
   add_foreign_key "menu_configs", "users"
+  add_foreign_key "meta_lead_forms", "pipeline_stages"
+  add_foreign_key "meta_lead_forms", "pipelines"
+  add_foreign_key "meta_lead_notification_settings", "inboxes", on_delete: :nullify
+  add_foreign_key "meta_lead_submissions", "contacts", on_delete: :nullify
+  add_foreign_key "meta_lead_submissions", "meta_lead_forms", on_delete: :nullify
+  add_foreign_key "meta_lead_submissions", "pipeline_items", on_delete: :nullify
   add_foreign_key "oauth_access_grants", "oauth_applications", column: "application_id"
   add_foreign_key "oauth_access_tokens", "oauth_applications", column: "application_id"
   add_foreign_key "pipeline_item_products", "pipeline_items", on_delete: :cascade
@@ -2116,7 +2696,13 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
   add_foreign_key "scheduled_action_notifications", "scheduled_actions", on_delete: :cascade
   add_foreign_key "scheduled_actions", "contacts", on_delete: :cascade
   add_foreign_key "scheduled_actions", "conversations", on_delete: :cascade
+  add_foreign_key "service_invoice_schedule_confirmations", "service_invoice_schedules"
+  add_foreign_key "service_invoice_schedule_confirmations", "service_invoices"
+  add_foreign_key "service_invoice_schedules", "fiscal_establishments"
+  add_foreign_key "service_invoices", "fiscal_establishments"
+  add_foreign_key "service_invoices", "work_orders"
   add_foreign_key "setup_survey_responses", "users"
+  add_foreign_key "site_lead_submissions", "sites", on_delete: :nullify
   add_foreign_key "stage_inactivity_executions", "pipeline_items", on_delete: :cascade
   add_foreign_key "stage_movements", "pipeline_items"
   add_foreign_key "stage_movements", "pipeline_stages", column: "from_stage_id"
@@ -2125,7 +2711,4 @@ ActiveRecord::Schema[7.1].define(version: 2026_09_18_200000) do
   add_foreign_key "user_roles", "users"
   add_foreign_key "user_roles", "users", column: "granted_by_id"
   add_foreign_key "user_tours", "users"
-  add_foreign_key "whatsapp_ad_leads", "contacts"
-  add_foreign_key "whatsapp_ad_leads", "conversations"
-  add_foreign_key "whatsapp_ad_leads", "messages"
 end

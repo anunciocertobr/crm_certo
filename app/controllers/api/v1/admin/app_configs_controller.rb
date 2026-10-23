@@ -126,6 +126,8 @@ module Api
                                      IOS_APP_ID ANDROID_BUNDLE_ID],
           'frontend_runtime' => %w[RECAPTCHA_SITE_KEY CLARITY_PROJECT_ID],
           'ifood' => %w[IFOOD_CLIENT_ID IFOOD_CLIENT_SECRET IFOOD_MERCHANT_ID],
+          'mercado_livre' => %w[MERCADO_LIVRE_CLIENT_ID MERCADO_LIVRE_CLIENT_SECRET],
+          'shopee' => %w[SHOPEE_PARTNER_ID SHOPEE_PARTNER_KEY],
           'ninety_nine' => %w[NINETY_NINE_BASE_URL NINETY_NINE_STORE_ID NINETY_NINE_CLIENT_ID NINETY_NINE_CLIENT_SECRET],
           'digital_menu' => %w[
             MENU_COMPANY_NAME MENU_HEADER_COLOR MENU_BACKGROUND_COLOR MENU_FOOTER_COLOR

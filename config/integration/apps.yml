@@ -397,3 +397,57 @@ google_ads:
       "additionalProperties": false
     }
   visible_properties: ["customer_id"]
+
+# OAuth2 authorization-code por vendedor (cada cliente final do CRM conecta
+# a própria conta ML) — ver Integrations::App#build_mercado_livre_action e
+# Api::V1::Integrations::MercadoLivreAuthorizationsController#callback.
+# user_id/nickname identificam QUAL conta ML está conectada (a Graph do ML
+# não tem conceito de "selecionar depois", o vendedor já escolhe ao logar).
+mercado_livre:
+  id: mercado_livre
+  logo: mercado_livre.png
+  i18n_key: mercado_livre
+  action: https://auth.mercadolivre.com.br/authorization
+  hook_type: account
+  allow_multiple_hooks: false
+  settings_json_schema:
+    {
+      "type": "object",
+      "properties":
+        {
+          "user_id": { "type": "string" },
+          "nickname": { "type": "string" },
+          "access_token": { "type": "string" },
+          "refresh_token": { "type": "string" },
+          "expires_on": { "type": "string" },
+          "scope": { "type": "string" }
+        },
+      "additionalProperties": false
+    }
+  visible_properties: ["nickname", "user_id"]
+
+# Shopee Open Platform — cada requisição exige assinatura HMAC-SHA256
+# (partner_key + path + timestamp), não só Authorization: Bearer — ver
+# Shopee::Client. shop_id vem de volta no callback (parâmetro próprio do
+# fluxo Shopee, não dentro do token response como ML/Dropbox/Google).
+shopee:
+  id: shopee
+  logo: shopee.png
+  i18n_key: shopee
+  action: https://partner.shopeemobile.com/api/v2/shop/auth_partner
+  hook_type: account
+  allow_multiple_hooks: false
+  settings_json_schema:
+    {
+      "type": "object",
+      "properties":
+        {
+          "shop_id": { "type": "string" },
+          "shop_name": { "type": "string" },
+          "access_token": { "type": "string" },
+          "refresh_token": { "type": "string" },
+          "expires_on": { "type": "string" }
+        },
+      "additionalProperties": false
+    }
+  visible_properties: ["shop_name", "shop_id"]

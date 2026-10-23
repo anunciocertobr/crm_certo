@@ -257,6 +257,14 @@ en:
       name: 'Google Login'
       short_description: 'Connect your Google account to read Drive files and Tag Manager data.'
       description: 'Sign in with Google to allow read-only access to Google Drive and Google Tag Manager, used by other tools in the CRM.'
+    mercado_livre:
+      name: 'Mercado Livre'
+      short_description: 'Connect a Mercado Livre seller account to publish products, sync orders and inventory.'
+      description: 'Connect a Mercado Livre seller account to publish products from the CRM catalog as listings, bring in orders received on Mercado Livre, and keep stock/price in sync in both directions.'
+    shopee:
+      name: 'Shopee'
+      short_description: 'Connect a Shopee seller account to publish products, sync orders and inventory.'
+      description: 'Connect a Shopee seller account to publish products from the CRM catalog as listings, bring in orders received on Shopee, and keep stock/price in sync in both directions.'
     dropbox:
       name: 'Dropbox'
       short_description: 'Connect a Dropbox account to browse and manage files from the CRM.'

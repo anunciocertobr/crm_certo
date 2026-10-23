@@ -4,6 +4,8 @@ class Integrations::App
   include Linear::IntegrationHelper
   include Hubspot::IntegrationHelper
   include Dropbox::IntegrationHelper
+  include MercadoLivre::IntegrationHelper
+  include Shopee::IntegrationHelper
   include GoogleConcern
   attr_accessor :params
 
@@ -48,6 +50,10 @@ class Integrations::App
       generate_google_token('google_ads')
     when 'dropbox'
       generate_dropbox_token('dropbox')
+    when 'mercado_livre'
+      generate_mercado_livre_token('mercado_livre')
+    when 'shopee'
+      generate_shopee_token('shopee')
     else
       nil
     end
@@ -68,6 +74,10 @@ class Integrations::App
       build_google_ads_action
     when 'dropbox'
       build_dropbox_action
+    when 'mercado_livre'
+      build_mercado_livre_action
+    when 'shopee'
+      build_shopee_action
     else
       params[:action]
     end
@@ -83,6 +93,10 @@ class Integrations::App
       GlobalConfigService.load('HUBSPOT_CLIENT_ID', nil).present?
     when 'shopify'
       GlobalConfigService.load('SHOPIFY_CLIENT_ID', nil).present?
+    when 'mercado_livre'
+      GlobalConfigService.load('MERCADO_LIVRE_CLIENT_ID', nil).present?
+    when 'shopee'
+      GlobalConfigService.load('SHOPEE_PARTNER_ID', nil).present?
     when 'leadsquared', 'bms'
       true
     when 'webhook', 'dashboard_apps', 'openai', 'gemini', 'google_workspace', 'groq', 'google_ads', 'elevenlabs', 'huggingface'
@@ -254,6 +268,45 @@ class Integrations::App
     ].join('&')
   end
 
+  # OAuth2 authorization-code padrão, igual Dropbox — cada conta final do
+  # CRM conecta a PRÓPRIA loja ML (diferente do iFood, que usa uma única
+  # credencial client_credentials pra conta inteira do sistema).
+  def build_mercado_livre_action
+    client_id = GlobalConfigService.load('MERCADO_LIVRE_CLIENT_ID', nil)
+    return nil unless client_id.present?
+
+    [
+      "#{params[:action]}?response_type=code",
+      "client_id=#{client_id}",
+      "redirect_uri=#{CGI.escape(self.class.mercado_livre_integration_url)}",
+      "state=#{encode_state}"
+    ].join('&')
+  end
+
+  # Shopee NÃO é OAuth2 "padrão": o endpoint de autorização exige uma
+  # assinatura HMAC-SHA256 (partner_id + path + timestamp, com o
+  # partner_key) já na URL de redirect — sem isso o Shopee recusa antes
+  # mesmo de mostrar a tela de login. `redirect` é pra onde o Shopee manda
+  # de volta (code + shop_id), igual `redirect_uri` nos outros provedores.
+  def build_shopee_action
+    partner_id = GlobalConfigService.load('SHOPEE_PARTNER_ID', nil)
+    partner_key = GlobalConfigService.load('SHOPEE_PARTNER_KEY', nil)
+    return nil unless partner_id.present? && partner_key.present?
+
+    path = '/api/v2/shop/auth_partner'
+    timestamp = Time.current.to_i
+    base_string = "#{partner_id}#{path}#{timestamp}"
+    sign = OpenSSL::HMAC.hexdigest('SHA256', partner_key, base_string)
+
+    [
+      params[:action],
+      "?partner_id=#{partner_id}",
+      "&timestamp=#{timestamp}",
+      "&sign=#{sign}",
+      "&redirect=#{CGI.escape("#{self.class.shopee_integration_url}?state=#{encode_state}")}"
+    ].join
+  end
+
   def enabled?(_account = nil)
     case params[:id]
     when 'webhook'
@@ -289,6 +342,14 @@ class Integrations::App
 
   def self.dropbox_integration_url
     "#{ENV.fetch('FRONTEND_URL', nil)}/settings/integrations/dropbox/callback"
+  end
+
+  def self.mercado_livre_integration_url
+    "#{ENV.fetch('FRONTEND_URL', nil)}/settings/integrations/mercado_livre/callback"
+  end
+
+  def self.shopee_integration_url
+    "#{ENV.fetch('FRONTEND_URL', nil)}/settings/integrations/shopee/callback"
   end
 
   class << self

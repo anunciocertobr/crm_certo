@@ -189,6 +189,18 @@ Rails.application.routes.draw do
         post '/orders/:id/arrived_at_destination', to: 'ifood#arrived_at_destination'
         post '/orders/:id/verify_delivery_code', to: 'ifood#verify_delivery_code'
       end
+      scope :mercado_livre, as: :mercado_livre do
+        get '/status', to: 'mercado_livre#status'
+        get '/orders', to: 'mercado_livre#index'
+        post '/orders/sync', to: 'mercado_livre#sync'
+        post '/products/:product_id/publish', to: 'mercado_livre#publish_product'
+      end
+      scope :shopee, as: :shopee do
+        get '/status', to: 'shopee#status'
+        get '/orders', to: 'shopee#index'
+        post '/orders/sync', to: 'shopee#sync'
+        post '/products/:product_id/publish', to: 'shopee#publish_product'
+      end
       namespace :admin do
         get 'app_configs/:config_type', to: 'app_configs#show', as: :app_config
         post 'app_configs/:config_type', to: 'app_configs#create', as: :app_configs
@@ -813,6 +825,8 @@ Rails.application.routes.draw do
       # por google/callback, microsoft/callback etc. acima.
       post 'google_workspace/callback', to: 'integrations/google_workspace_authorizations#callback'
       post 'dropbox/callback', to: 'integrations/dropbox_authorizations#callback'
+      post 'mercado_livre/callback', to: 'integrations/mercado_livre_authorizations#callback'
+      post 'shopee/callback', to: 'integrations/shopee_authorizations#callback'
       get 'google_ads/accessible_customers', to: 'integrations/google_ads_authorizations#accessible_customers'
       post 'google_ads/select_customer', to: 'integrations/google_ads_authorizations#select_customer'
 

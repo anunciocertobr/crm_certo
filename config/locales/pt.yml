@@ -211,6 +211,14 @@ pt:
     google_workspace:
       name: 'Login com Google'
       description: 'Conecte sua conta Google para permitir acesso de leitura ao Google Drive e ao Google Tag Manager, usado por outras ferramentas do CRM.'
+    mercado_livre:
+      name: 'Mercado Livre'
+      short_description: 'Conecte uma conta de vendedor do Mercado Livre para publicar produtos, sincronizar pedidos e estoque.'
+      description: 'Conecte uma conta de vendedor do Mercado Livre para publicar produtos do catálogo do CRM como anúncios, trazer os pedidos recebidos no Mercado Livre, e manter estoque/preço sincronizados nos dois sentidos.'
+    shopee:
+      name: 'Shopee'
+      short_description: 'Conecte uma conta de vendedor da Shopee para publicar produtos, sincronizar pedidos e estoque.'
+      description: 'Conecte uma conta de vendedor da Shopee para publicar produtos do catálogo do CRM como anúncios, trazer os pedidos recebidos na Shopee, e manter estoque/preço sincronizados nos dois sentidos.'
     dropbox:
       name: 'Dropbox'
       short_description: 'Conecte uma conta Dropbox para navegar e gerenciar arquivos pelo CRM.'
