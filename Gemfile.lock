@@ -233,6 +233,11 @@ GEM
       googleauth (~> 1)
     fernet (2.3)
       valcro (~> 0.1)
+    ferrum (0.19.1)
+      addressable (~> 2.5)
+      base64 (~> 0.2)
+      concurrent-ruby (~> 1.1)
+      websocket-driver (~> 0.7)
     ffi (1.17.2)
     ffi (1.17.2-arm64-darwin)
     ffi (1.17.2-x86_64-darwin)
@@ -1049,6 +1054,7 @@ DEPENDENCIES
   faker
   fcm
   fernet
+  ferrum
   flag_shih_tzu
   foreman
   geocoder

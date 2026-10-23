@@ -137,7 +137,18 @@ RUN apk update && apk add --no-cache \
   vips \
   dos2unix \
   ffmpeg \
+  chromium \
+  nss \
+  freetype \
+  harfbuzz \
+  ca-certificates \
+  ttf-freefont \
   && gem install bundler -v "${BUNDLER_VERSION}"
+
+# Ferrum (automação de billing do Meta Ads) precisa saber onde está o
+# binário do Chromium instalado acima — o Alpine não o coloca no PATH
+# padrão que o Ferrum procura sozinho.
+ENV BROWSER_PATH="/usr/bin/chromium-browser"
 
 COPY --from=node /usr/local/bin/node /usr/local/bin/
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules

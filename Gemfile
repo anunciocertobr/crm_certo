@@ -276,3 +276,9 @@ gem "json_refs", "~> 0.1.9"
 
 # Fernet symmetric encryption for sensitive configuration values
 gem 'fernet'
+
+# Headless Chrome driver for the Meta Ads billing automation (Pagamentos
+# tab) — the Lead Ads / billing_hub screens have no public Graph API
+# equivalent, so this drives the real Ads Manager UI. Chosen over
+# Selenium/Capybara (test-oriented) for lighter production use outside specs.
+gem 'ferrum'

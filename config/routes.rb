@@ -249,6 +249,17 @@ Rails.application.routes.draw do
         resources :ad_leads, only: [:index, :update]
       end
 
+      # Automação de cobrança (PIX/boleto) de saldo pré-pago do Meta Ads
+      # (aba Pagamentos > Criação Meta) — ver Meta::Billing::BrowserSession.
+      # Sem endpoint público da Meta pra isso; a sessão de navegador usada
+      # pela automação é importada por cookies (nunca senha), ver
+      # Api::V1::Meta::BillingSessionsController#import_cookies.
+      namespace :meta do
+        resource :billing_session, only: [:show], controller: 'billing_sessions' do
+          post :import_cookies
+        end
+      end
+
       resource :global_config, controller: 'global_config', only: [:show]
       get 'ai_credentials/migration_state', to: 'ai_credentials#migration_state'
       namespace :integrations do
