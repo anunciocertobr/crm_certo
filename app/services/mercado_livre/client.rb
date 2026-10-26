@@ -4,11 +4,12 @@
 # conta final do CRM conectou a PRÓPRIA loja ML, então o token é por hook,
 # não por classe.
 #
-# NUNCA TESTADO CONTRA A API REAL — sem app ML cadastrado ainda (ver
-# MercadoLivreAuthorizationsController). Nomes de campo/endpoint seguem a
-# documentação pública do ML; confirmar contra a API real assim que houver
-# credencial, principalmente #publish_item (payload de criação de anúncio
-# tem bastante variação por categoria) e o formato de #orders.
+# #connected?/#search_orders testados contra a API real em 26/10/2026 (conta
+# CA20250712202133, sem pedidos ainda — resposta real da API confirmada,
+# paging.total: 0, não erro). #order_details/#publish_item/#update_item
+# continuam SEM teste real (sem pedido/produto publicado ainda pra
+# exercitar); #publish_item principalmente — payload de criação de anúncio
+# tem bastante variação por categoria real do ML.
 class MercadoLivre::Client
   BASE_URL = 'https://api.mercadolibre.com'
   TOKEN_URL = 'https://api.mercadolibre.com/oauth/token'

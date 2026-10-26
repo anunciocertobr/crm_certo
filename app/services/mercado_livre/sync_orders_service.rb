@@ -4,7 +4,10 @@
 # espelho local (MercadoLivreOrder). Mesmo raciocínio de "não apagar dado
 # já salvo com payload degradado" do Ifood::SyncOrdersService.
 #
-# NUNCA TESTADO CONTRA A API REAL — ver nota em MercadoLivre::Client.
+# #call testado contra a API real (26/10/2026) — devolveu {processed: 0}
+# corretamente pra conta sem pedidos. #sync_order/#attributes_from (o
+# mapeamento payload→MercadoLivreOrder) ainda SEM teste real — precisa de
+# um pedido de verdade chegando pra confirmar os nomes de campo.
 class MercadoLivre::SyncOrdersService
   def initialize(client: MercadoLivre::Client.new)
     @client = client

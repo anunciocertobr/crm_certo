@@ -1,7 +1,8 @@
 # Espelha Api::V1::IfoodController no formato (status/sync/index/publish),
 # mas sobre MercadoLivre::Client — OAuth2 por vendedor (Integrations::Hook),
-# não client_credentials global. NUNCA TESTADO CONTRA A API REAL — ver nota
-# em MercadoLivre::Client.
+# não client_credentials global. #status/#sync testados contra a API real
+# (26/10/2026) — ver nota em MercadoLivre::Client. #publish_product ainda
+# sem teste real (nenhum produto publicado ainda).
 module Api
   module V1
     class MercadoLivreController < Api::V1::BaseController

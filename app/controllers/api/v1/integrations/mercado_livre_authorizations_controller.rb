@@ -4,12 +4,13 @@
 # DropboxAuthorizationsController, com o app OAuth próprio do Mercado
 # Livre (MERCADO_LIVRE_CLIENT_ID/SECRET em GlobalConfig).
 #
-# NUNCA TESTADO CONTRA A API REAL — sem client_id/client_secret de um app
-# ML cadastrado ainda (bloqueado até o Marco criar o app em
-# https://developers.mercadolivre.com.br e informar as credenciais). Os
-# nomes de campo do token response (access_token/refresh_token/expires_in/
-# user_id) seguem a documentação pública do ML; confirmar contra a API real
-# assim que houver credencial antes de considerar isso pronto.
+# Testado de ponta a ponta contra a API real em 26/10/2026 (conta
+# CA20250712202133): troca de code por token funcionou, hook gravado com
+# access_token/refresh_token/user_id reais. Precisou corrigir 2 bugs reais
+# no caminho — não neste arquivo: redirect_uri cadastrada errada no app do
+# ML (apontava só pro n8n antigo) e PublicRoute.tsx do frontend chutando
+# usuário já logado pra fora da página de callback antes dela processar o
+# code (commit e7b4185f em evo-ai-frontend-community).
 class Api::V1::Integrations::MercadoLivreAuthorizationsController < Api::V1::BaseController
   include MercadoLivre::IntegrationHelper
 
