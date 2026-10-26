@@ -51,7 +51,7 @@ class Api::V1::Integrations::GoogleWorkspaceAuthorizationsController < Api::V1::
   end
 
   def save_hook(identifier, parsed, email)
-    hook = Integrations::Hook.find_or_initialize_by(app_id: identifier)
+    hook = resolve_hook(identifier, parsed)
     existing_settings = hook.settings || {}
     hook.settings = existing_settings.merge(
       'email' => email,
@@ -63,5 +63,42 @@ class Api::V1::Integrations::GoogleWorkspaceAuthorizationsController < Api::V1::
       'expires_on' => (Time.current.utc + parsed['expires_in'].to_i.seconds).to_s
     )
     hook.save!
+  end
+
+  # google_workspace continua singleton (find_or_initialize_by sem mais
+  # nada). google_ads permite múltiplos hooks (1 por MCC/login — ver
+  # config/integration/apps.yml) desde que cada reconexão não apague as
+  # outras; por isso aqui a gente primeiro descobre quais contas/MCCs ESSE
+  # login enxerga direto (sem expandir árvore nenhuma) pra decidir em qual
+  # hook gravar.
+  def resolve_hook(identifier, parsed)
+    return Integrations::Hook.find_or_initialize_by(app_id: identifier) unless identifier == 'google_ads'
+
+    candidates_result = Google::AdsInsightsService.new(access_token: parsed['access_token']).top_level_customers
+    candidates = candidates_result.success ? candidates_result.data : []
+
+    # Caso raro: o login enxerga mais de 1 MCC/conta direto. Guarda os
+    # candidatos no próprio hook (ainda sem reference_id) — a tela de
+    # Integrações mostra um seletor rápido pra finalizar essa conexão
+    # específica antes dela virar utilizável.
+    return Integrations::Hook.new(app_id: 'google_ads', settings: { 'pending_candidates' => candidates }) if candidates.size != 1
+
+    reference_id = candidates.first[:id]
+    find_or_heal_google_ads_hook(reference_id) || Integrations::Hook.new(app_id: 'google_ads', reference_id: reference_id)
+  end
+
+  # Acha o hook já conectado pra esse MCC (reconexão/renovação de token) —
+  # inclusive o hook legado único de antes desta mudança, que ainda não
+  # tem reference_id preenchido (auto-cura: preenche na hora, comparando
+  # contra login_customer_id/customer_id salvos nas settings antigas).
+  def find_or_heal_google_ads_hook(reference_id)
+    hook = Integrations::Hook.account_hooks.find_by(app_id: 'google_ads', reference_id: reference_id)
+    return hook if hook
+
+    normalized = reference_id.to_s.gsub(/\D/, '')
+    legacy = Integrations::Hook.account_hooks.where(app_id: 'google_ads', reference_id: nil).find do |h|
+      [h.settings['login_customer_id'], h.settings['customer_id']].any? { |v| v.to_s.gsub(/\D/, '') == normalized }
+    end
+    legacy&.tap { |h| h.reference_id = reference_id }
   end
 end

@@ -36,10 +36,10 @@ module Api
         # seletor "publicar nesta campanha" — sem isso, o publish liga o
         # asset na conta inteira.
         def campaigns
-          customer_id = google_ads_customer_id
+          customer_id = params[:customer_id].to_s.gsub(/\D/, '').presence
           return render_not_connected unless customer_id
 
-          result = Google::AdsInfrastructureService.new.list_campaigns(customer_id: customer_id)
+          result = Google::AdsInfrastructureService.new(login_customer_id: params[:login_customer_id]).list_campaigns(customer_id: customer_id)
           if result.success
             render json: { success: true, data: result.data }
           else
@@ -48,14 +48,15 @@ module Api
         end
 
         # Publica um GoogleAdsAsset de verdade na Google Ads API — exige
-        # canal conectado E conta selecionada (customer_id). `campaign_id`
-        # é opcional: sem ele, liga o asset na conta inteira.
+        # canal conectado E conta selecionada (customer_id, do MCC/conexão
+        # identificado por login_customer_id). `campaign_id` é opcional:
+        # sem ele, liga o asset na conta inteira.
         def publish
           asset = GoogleAdsAsset.find(params[:id])
-          customer_id = google_ads_customer_id
+          customer_id = params[:customer_id].to_s.gsub(/\D/, '').presence
           return render_not_connected unless customer_id
 
-          result = Google::AdsAssetPublisher.new.publish(
+          result = Google::AdsAssetPublisher.new(infrastructure_service: Google::AdsInfrastructureService.new(login_customer_id: params[:login_customer_id])).publish(
             google_ads_asset: asset, customer_id: customer_id, campaign_id: params[:campaign_id].presence
           )
 
@@ -74,11 +75,6 @@ module Api
         end
 
         private
-
-        def google_ads_customer_id
-          hook = Integrations::Hook.account_hooks.find_by(app_id: 'google_ads')
-          hook&.settings&.dig('customer_id').to_s.gsub(/\D/, '').presence
-        end
 
         def render_not_connected
           render json: { success: false, errors: ['Conecte uma conta Google Ads em Integrações antes de publicar.'] },

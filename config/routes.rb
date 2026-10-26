@@ -827,6 +827,7 @@ Rails.application.routes.draw do
       post 'dropbox/callback', to: 'integrations/dropbox_authorizations#callback'
       post 'mercado_livre/callback', to: 'integrations/mercado_livre_authorizations#callback'
       post 'shopee/callback', to: 'integrations/shopee_authorizations#callback'
+      get 'google_ads/connections', to: 'integrations/google_ads_authorizations#connections'
       get 'google_ads/accessible_customers', to: 'integrations/google_ads_authorizations#accessible_customers'
       post 'google_ads/select_customer', to: 'integrations/google_ads_authorizations#select_customer'
 

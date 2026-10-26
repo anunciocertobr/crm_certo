@@ -16,16 +16,27 @@ class Google::AdsInsightsService
 
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 
-  def initialize
-    @hook = Integrations::Hook.account_hooks.find_by(app_id: 'google_ads')
+  # login_customer_id: qual MCC/conexão usar (reference_id do Hook) — agora
+  # que google_ads permite múltiplos hooks (ver config/integration/apps.yml),
+  # omitir isso cai no hook legado único (compatibilidade enquanto os
+  # chamadores ainda não passam o parâmetro). access_token: usado só no
+  # bootstrap logo após o OAuth (GoogleWorkspaceAuthorizationsController),
+  # quando ainda não existe hook nenhum pra essa conexão — pula a busca de
+  # hook inteira e usa esse token direto, só pra essa instância.
+  def initialize(login_customer_id: nil, access_token: nil)
+    @bootstrap_token = access_token
+    @hook = resolve_hook(login_customer_id) if access_token.blank?
   end
 
   def connected?
-    @hook&.settings.present?
+    @bootstrap_token.present? || @hook&.settings.present?
   end
 
-  def campaigns(date_start:, date_stop:)
-    search(<<~GAQL)
+  # customer_id: opcional por ora (compatibilidade — cai no settings do hook
+  # resolvido se omitido); fica obrigatório na prática assim que os
+  # controllers (Fase 3) passarem a exigir o parâmetro do frontend.
+  def campaigns(date_start:, date_stop:, customer_id: nil)
+    search(<<~GAQL, customer_id: customer_id)
       SELECT customer.descriptive_name,
              campaign.id,
              campaign.name,
@@ -43,16 +54,16 @@ class Google::AdsInsightsService
     GAQL
   end
 
-  def account_cost(date_start:, date_stop:)
-    search(<<~GAQL)
+  def account_cost(date_start:, date_stop:, customer_id: nil)
+    search(<<~GAQL, customer_id: customer_id)
       SELECT customer.descriptive_name, metrics.cost_micros
       FROM customer
       WHERE segments.date BETWEEN '#{date_start}' AND '#{date_stop}'
     GAQL
   end
 
-  def top_search_terms(date_start:, date_stop:, order_by: 'metrics.impressions', limit: 20)
-    search(<<~GAQL)
+  def top_search_terms(date_start:, date_stop:, order_by: 'metrics.impressions', limit: 20, customer_id: nil)
+    search(<<~GAQL, customer_id: customer_id)
       SELECT search_term_view.search_term,
              campaign.id,
              campaign.name,
@@ -76,6 +87,28 @@ class Google::AdsInsightsService
   # apontando pro MCC) — sem essa expansão, MCCs reais ficavam com a lista de
   # contas vazia/errada no picker.
   def accessible_customers
+    base_result = top_level_customers
+    return base_result unless base_result.success
+
+    token = access_token
+    developer_token = GlobalConfigService.load('GOOGLE_ADS_DEVELOPER_TOKEN', nil)
+
+    expanded = base_result.data.flat_map do |customer|
+      customer[:manager] ? customer_client_tree(customer[:id], token, developer_token) : [customer]
+    end
+
+    Result.new(success: true, data: expanded.uniq { |c| c[:id] })
+  rescue StandardError => e
+    Rails.logger.error "Google::AdsInsightsService: accessible_customers error: #{e.message}"
+    Result.new(success: false, error: 'Erro inesperado ao listar contas do Google Ads.')
+  end
+
+  # Só o que listAccessibleCustomers devolve direto, SEM expandir MCC nenhum
+  # — é o que GoogleWorkspaceAuthorizationsController#save_hook usa pra
+  # decidir se um login novo é 1 MCC/conta (caso normal) ou mais de um
+  # (caso raro, precisa de seletor). `accessible_customers` (pública, usada
+  # pelo picker) chama isso e DEPOIS expande cada manager.
+  def top_level_customers
     return Result.new(success: false, error: 'Google Ads não configurado em Integrações.') unless connected?
 
     token = access_token
@@ -97,24 +130,36 @@ class Google::AdsInsightsService
     body = JSON.parse(response.body)
 
     unless response.code.to_i.between?(200, 299)
-      Rails.logger.error "Google::AdsInsightsService: accessible_customers -> #{response.code} #{response.body}"
+      Rails.logger.error "Google::AdsInsightsService: top_level_customers -> #{response.code} #{response.body}"
       return Result.new(success: false, error: body.dig('error', 'message') || 'Falha ao listar contas do Google Ads.')
     end
 
     ids = (body['resourceNames'] || []).map { |name| name.split('/').last }
-    base = ids.map { |id| customer_summary(id, token, developer_token) }
-
-    expanded = base.flat_map do |customer|
-      customer[:manager] ? customer_client_tree(customer[:id], token, developer_token) : [customer]
-    end
-
-    Result.new(success: true, data: expanded.uniq { |c| c[:id] })
+    Result.new(success: true, data: ids.map { |id| customer_summary(id, token, developer_token) })
   rescue StandardError => e
-    Rails.logger.error "Google::AdsInsightsService: accessible_customers error: #{e.message}"
+    Rails.logger.error "Google::AdsInsightsService: top_level_customers error: #{e.message}"
     Result.new(success: false, error: 'Erro inesperado ao listar contas do Google Ads.')
   end
 
   private
+
+  # Resolve qual Hook usar: por reference_id (MCC específico) quando dado,
+  # com auto-cura pro hook legado único que ainda não tem reference_id
+  # preenchido (conexão feita antes desta mudança); sem login_customer_id
+  # nenhum, cai no hook único de sempre (chamador ainda não migrado).
+  def resolve_hook(login_customer_id)
+    return Integrations::Hook.account_hooks.find_by(app_id: 'google_ads') if login_customer_id.blank?
+
+    normalized = login_customer_id.to_s.gsub(/\D/, '')
+    hook = Integrations::Hook.account_hooks.find_by(app_id: 'google_ads', reference_id: normalized)
+    return hook if hook
+
+    legacy = Integrations::Hook.account_hooks.where(app_id: 'google_ads', reference_id: nil).find do |h|
+      [h.settings['login_customer_id'], h.settings['customer_id']].any? { |v| v.to_s.gsub(/\D/, '') == normalized }
+    end
+    legacy&.update_column(:reference_id, normalized)
+    legacy
+  end
 
   def customer_summary(customer_id, token, developer_token)
     uri = URI("#{BASE_URL}/customers/#{customer_id}/googleAds:search")
@@ -183,14 +228,15 @@ class Google::AdsInsightsService
     [{ id: mcc_id, name: nil, manager: true, level: 0 }]
   end
 
-  def search(query)
+  def search(query, customer_id: nil)
     return Result.new(success: false, error: 'Google Ads não configurado em Integrações.') unless connected?
 
     token = access_token
     return Result.new(success: false, error: 'Falha ao renovar o token do Google Ads.') unless token
 
-    settings = @hook.settings
-    customer_id = settings['customer_id'].to_s.gsub(/\D/, '')
+    settings = @hook&.settings || {}
+    customer_id = customer_id.presence || settings['customer_id']
+    customer_id = customer_id.to_s.gsub(/\D/, '')
 
     uri = URI("#{BASE_URL}/customers/#{customer_id}/googleAds:search")
     http = Net::HTTP.new(uri.host, uri.port)
@@ -200,7 +246,10 @@ class Google::AdsInsightsService
     request = Net::HTTP::Post.new(uri.request_uri)
     request['Authorization'] = "Bearer #{token}"
     request['developer-token'] = GlobalConfigService.load('GOOGLE_ADS_DEVELOPER_TOKEN', nil)
-    login_customer_id = settings['login_customer_id'].to_s.gsub(/\D/, '')
+    # reference_id é a fonte de verdade a partir de agora (1 hook = 1 MCC);
+    # settings['login_customer_id'] fica só de fallback pro hook legado que
+    # ainda não passou pela auto-cura (ver #resolve_hook).
+    login_customer_id = (@hook&.reference_id.presence || settings['login_customer_id']).to_s.gsub(/\D/, '')
     request['login-customer-id'] = login_customer_id if login_customer_id.present?
     request['Content-Type'] = 'application/json'
     request.body = { query: query }.to_json
@@ -224,6 +273,8 @@ class Google::AdsInsightsService
   # refresh_token é estável; só o access_token de curta duração é gerado a
   # cada chamada. Simples e sem estado pra manter.
   def access_token
+    return @bootstrap_token if @bootstrap_token.present?
+
     settings = @hook.settings
     uri = URI(TOKEN_URL)
     response = Net::HTTP.post_form(uri, {

@@ -18,8 +18,12 @@ class Google::AdsInfrastructureService
 
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 
-  def initialize
-    @hook = Integrations::Hook.account_hooks.find_by(app_id: 'google_ads')
+  # login_customer_id: qual MCC/conexão usar (reference_id do Hook) — ver
+  # nota equivalente em Google::AdsInsightsService#initialize. Omitir cai
+  # no hook legado único, só por compatibilidade enquanto os chamadores
+  # não passam o parâmetro.
+  def initialize(login_customer_id: nil)
+    @hook = resolve_hook(login_customer_id)
   end
 
   def connected?
@@ -204,7 +208,25 @@ class Google::AdsInfrastructureService
   end
 
   def login_customer_id
-    @hook&.settings&.dig('login_customer_id').to_s.gsub(/\D/, '').presence
+    (@hook&.reference_id.presence || @hook&.settings&.dig('login_customer_id')).to_s.gsub(/\D/, '').presence
+  end
+
+  # Mesma lógica de Google::AdsInsightsService#resolve_hook (auto-cura do
+  # hook legado sem reference_id incluída) — duplicada aqui porque as duas
+  # classes não compartilham um módulo comum hoje; se aparecer uma 3ª
+  # classe precisando disso, vale extrair pra um concern.
+  def resolve_hook(login_customer_id)
+    return Integrations::Hook.account_hooks.find_by(app_id: 'google_ads') if login_customer_id.blank?
+
+    normalized = login_customer_id.to_s.gsub(/\D/, '')
+    hook = Integrations::Hook.account_hooks.find_by(app_id: 'google_ads', reference_id: normalized)
+    return hook if hook
+
+    legacy = Integrations::Hook.account_hooks.where(app_id: 'google_ads', reference_id: nil).find do |h|
+      [h.settings['login_customer_id'], h.settings['customer_id']].any? { |v| v.to_s.gsub(/\D/, '') == normalized }
+    end
+    legacy&.update_column(:reference_id, normalized)
+    legacy
   end
 
   def mutate(customer_id, resource, operations)

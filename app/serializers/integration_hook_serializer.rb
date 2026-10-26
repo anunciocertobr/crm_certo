@@ -10,6 +10,7 @@ module IntegrationHookSerializer
       id: hook.id,
       app_id: hook.app_id,
       inbox_id: hook.inbox_id,
+      reference_id: hook.reference_id,
       status: hook.status,
       settings: hook.settings || {},
       hook_type: hook.hook_type,

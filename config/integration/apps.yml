@@ -380,7 +380,11 @@ google_ads:
   i18n_key: google_ads
   action: https://accounts.google.com/o/oauth2/auth
   hook_type: account
-  allow_multiple_hooks: false
+  # Até aqui era conexão única (reconectar sobrescrevia o hook anterior).
+  # Agora cada hook = 1 MCC/login, identificado pelo reference_id (coluna
+  # própria do Hook, fora deste settings) — permite "Adicionar MCC" na tela
+  # de Integrações sem apagar os já conectados.
+  allow_multiple_hooks: true
   settings_json_schema:
     {
       "type": "object",
@@ -392,7 +396,8 @@ google_ads:
           "scope": { "type": "string" },
           "expires_on": { "type": "string" },
           "customer_id": { "type": "string" },
-          "login_customer_id": { "type": "string" }
+          "login_customer_id": { "type": "string" },
+          "pending_candidates": { "type": "array" }
         },
       "additionalProperties": false
     }
