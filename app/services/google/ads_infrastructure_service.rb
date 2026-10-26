@@ -12,7 +12,9 @@ require 'net/http'
 # MCC, opcional, escolhido junto com o customer_id).
 class Google::AdsInfrastructureService
   TOKEN_URL = 'https://www.googleapis.com/oauth2/v3/token'
-  BASE_URL = 'https://googleads.googleapis.com/v19'
+  # Ver nota em Google::AdsInsightsService::BASE_URL — v19 sunset em
+  # 11/02/2026, trocado pra v26 (atual).
+  BASE_URL = 'https://googleads.googleapis.com/v26'
 
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 

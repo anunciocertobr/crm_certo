@@ -9,7 +9,10 @@ require 'net/http'
 # (GlobalConfig GOOGLE_ADS_DEVELOPER_TOKEN), exigida pela API além do OAuth.
 class Google::AdsInsightsService
   TOKEN_URL = 'https://www.googleapis.com/oauth2/v3/token'
-  BASE_URL = 'https://googleads.googleapis.com/v19'
+  # v19 foi desativada pelo Google em 11/02/2026 (sunset) — ficou quebrada em
+  # produção (404 silencioso) por 8+ meses até ser notada. v26 é a atual
+  # (lançada 12/10/2026, sunset tentativo só em 11/2027).
+  BASE_URL = 'https://googleads.googleapis.com/v26'
 
   Result = Struct.new(:success, :data, :error, keyword_init: true)
 
@@ -64,12 +67,14 @@ class Google::AdsInsightsService
     GAQL
   end
 
-  # Lista as contas de anúncios que a conta Google autenticada enxerga
-  # (contas próprias + o que uma MCC gerencia), pro passo de escolha depois
-  # do login — GET .../customers:listAccessibleCustomers não exige customer_id
-  # nenhum, só o access_token + developer_token. Pra cada ID tenta uma
-  # consulta GAQL leve pra trazer o nome; se falhar (ex.: sub-conta que
-  # exige login-customer-id da MCC pra ser lida), devolve só o ID mesmo.
+  # Lista as contas de anúncios que a conta Google autenticada enxerga.
+  # GET .../customers:listAccessibleCustomers só devolve o que é DIRETAMENTE
+  # acessível ao login — pra um login de MCC, isso é o próprio MCC
+  # (manager: true), nunca as contas que ele gerencia. Por isso, pra cada id
+  # marcado manager: true aqui, expandimos a árvore inteira via
+  # `customer_client_tree` (query GAQL customer_client com login-customer-id
+  # apontando pro MCC) — sem essa expansão, MCCs reais ficavam com a lista de
+  # contas vazia/errada no picker.
   def accessible_customers
     return Result.new(success: false, error: 'Google Ads não configurado em Integrações.') unless connected?
 
@@ -97,7 +102,13 @@ class Google::AdsInsightsService
     end
 
     ids = (body['resourceNames'] || []).map { |name| name.split('/').last }
-    Result.new(success: true, data: ids.map { |id| customer_summary(id, token, developer_token) })
+    base = ids.map { |id| customer_summary(id, token, developer_token) }
+
+    expanded = base.flat_map do |customer|
+      customer[:manager] ? customer_client_tree(customer[:id], token, developer_token) : [customer]
+    end
+
+    Result.new(success: true, data: expanded.uniq { |c| c[:id] })
   rescue StandardError => e
     Rails.logger.error "Google::AdsInsightsService: accessible_customers error: #{e.message}"
     Result.new(success: false, error: 'Erro inesperado ao listar contas do Google Ads.')
@@ -121,9 +132,55 @@ class Google::AdsInsightsService
     body = JSON.parse(response.body)
     row = response.code.to_i.between?(200, 299) ? body.dig('results', 0, 'customer') : nil
 
-    { id: customer_id, name: row && row['descriptiveName'], manager: row && row['manager'] == true }
+    { id: customer_id, name: row && row['descriptiveName'], manager: row && row['manager'] == true, level: 0 }
   rescue StandardError
-    { id: customer_id, name: nil, manager: false }
+    { id: customer_id, name: nil, manager: false, level: 0 }
+  end
+
+  # Expande um MCC na árvore completa de contas que ele gerencia (inclusive
+  # sub-MCCs, em qualquer profundidade — a API já devolve tudo achatado,
+  # não precisa recursão manual). Precisa do header login-customer-id
+  # apontando pro MCC, senão a API recusa a query inteira.
+  def customer_client_tree(mcc_id, token, developer_token)
+    uri = URI("#{BASE_URL}/customers/#{mcc_id}/googleAds:search")
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = true
+    http.read_timeout = 30
+
+    request = Net::HTTP::Post.new(uri.request_uri)
+    request['Authorization'] = "Bearer #{token}"
+    request['developer-token'] = developer_token
+    request['login-customer-id'] = mcc_id
+    request['Content-Type'] = 'application/json'
+    request.body = { query: <<~GAQL }.to_json
+      SELECT customer_client.id,
+             customer_client.descriptive_name,
+             customer_client.manager,
+             customer_client.level,
+             customer_client.status
+      FROM customer_client
+      WHERE customer_client.status = 'ENABLED'
+    GAQL
+
+    response = http.request(request)
+    unless response.code.to_i.between?(200, 299)
+      Rails.logger.error "Google::AdsInsightsService: customer_client_tree(#{mcc_id}) -> #{response.code} #{response.body}"
+      return [{ id: mcc_id, name: nil, manager: true, level: 0 }]
+    end
+
+    body = JSON.parse(response.body)
+    (body['results'] || []).map do |row|
+      client = row['customerClient']
+      {
+        id: client['id'].to_s,
+        name: client['descriptiveName'],
+        manager: client['manager'] == true,
+        level: client['level'].to_i
+      }
+    end
+  rescue StandardError => e
+    Rails.logger.error "Google::AdsInsightsService: customer_client_tree(#{mcc_id}) error: #{e.message}"
+    [{ id: mcc_id, name: nil, manager: true, level: 0 }]
   end
 
   def search(query)
