@@ -92,16 +92,28 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
         status: params.require(:status)
       ))
     when 'criar_formulario_lead'
-      respond(service.create_leadgen_form(**leadgen_form_params))
+      respond_with_leadgen_subscription(
+        service,
+        service.create_leadgen_form(**leadgen_form_params),
+        page_id: params.require(:id_pagina)
+      )
     when 'duplicar_formulario_lead'
       overrides = params[:overrides].is_a?(ActionController::Parameters) ? params[:overrides].to_unsafe_h.symbolize_keys : {}
       overrides[:questions] = parse_json_array(overrides[:questions]) if overrides[:questions].present?
-      respond(service.duplicate_leadgen_form(
-        source_page_id: params.require(:id_pagina_origem),
-        form_id: params.require(:id_formulario),
-        target_page_id: params.require(:id_pagina_destino),
-        overrides: overrides
-      ))
+      respond_with_leadgen_subscription(
+        service,
+        service.duplicate_leadgen_form(
+          source_page_id: params.require(:id_pagina_origem),
+          form_id: params.require(:id_formulario),
+          target_page_id: params.require(:id_pagina_destino),
+          overrides: overrides
+        ),
+        page_id: params.require(:id_pagina_destino)
+      )
+    when 'status_leadgen_pagina'
+      respond(service.leadgen_subscription(page_id: params.require(:id_pagina)))
+    when 'assinar_leadgen_pagina'
+      respond(service.subscribe_leadgen_webhook(page_id: params.require(:id_pagina)))
     when 'listar_publicos'
       respond(service.custom_audiences(ad_account_id: params.require(:id_conta_anuncio)))
     when 'listar_pixels'
@@ -341,6 +353,29 @@ class Api::V1::Reports::MetaAdsManagerController < Api::V1::BaseController
         pipeline_stage_name: item&.pipeline_stage&.name
       }
     end
+  end
+
+  # Cria/duplica o formulário e, na mesma resposta, tenta assinar o webhook de
+  # Lead Ads da Página de destino. A assinatura é idempotente e não pode
+  # derrubar a criação do formulário: se falhar, vai como aviso no campo
+  # `leadgen_subscription` (a UI mostra o botão "Assinar Lead Ads").
+  def respond_with_leadgen_subscription(service, result, page_id:)
+    return respond(result) unless result.success
+
+    data = result.data.is_a?(Hash) ? result.data.dup : { 'data' => result.data }
+    begin
+      subscription = service.subscribe_leadgen_webhook(page_id: page_id)
+      data['leadgen_subscription'] =
+        subscription.success ? subscription.data : { success: false, error: subscription.error }
+    rescue StandardError => e
+      Rails.logger.error "MetaAdsManagerController: assinatura leadgen falhou (#{page_id}): #{e.message}"
+      data['leadgen_subscription'] = {
+        success: false,
+        error: 'Formulário salvo, mas não foi possível assinar o Lead Ads desta Página.'
+      }
+    end
+
+    respond(Meta::AdsManagerService::Result.new(success: true, data: data))
   end
 
   def respond(result)

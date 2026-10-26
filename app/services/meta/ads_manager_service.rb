@@ -1665,6 +1665,64 @@ class Meta::AdsManagerService
     post("/#{form_id}", { status: status }, token.data)
   end
 
+  # Assina o app deste CRM no webhook de Lead Ads (`leadgen`) de uma Página —
+  # o equivalente ao nó "assinar webhook" do fluxo n8n da Ellie, mas usando o
+  # token da própria Página e sem depender de n8n. Idempotente: chamar de
+  # novo só mantém a assinatura, não duplica.
+  #
+  # Criar um formulário pela Graph API NÃO assina a Página automaticamente
+  # (só o botão "Criar formulário" do Gerenciador da Meta faz isso); por isso
+  # a criação/duplicação na UI também chama este método.
+  def subscribe_leadgen_webhook(page_id:)
+    token = resolve_page_token(page_id)
+    return token unless token.success
+
+    result = post(
+      "/#{page_id}/subscribed_apps",
+      { subscribed_fields: ['leadgen'].to_json },
+      token.data
+    )
+    return result unless result.success
+
+    subscription = leadgen_subscription(page_id: page_id, page_token: token.data)
+    # O POST já retornou success; se só a verificação falhar, a assinatura
+    # provavelmente foi feita. Devolve sucesso com `verified: false` em vez
+    # de fazer a UI achar que nada aconteceu.
+    return subscription if subscription.success
+
+    Result.new(
+      success: true,
+      data: { success: true, subscribed: true, verified: false, error: subscription.error }
+    )
+  end
+
+  # Status (sem alterar) da assinatura `leadgen` da Página para o app deste
+  # CRM. `subscribed_apps` lista TODOS os apps instalados (inclusive o n8n da
+  # Ellie, se estiver assinando a mesma Página), então filtra pelo FB_APP_ID.
+  def leadgen_subscription(page_id:, page_token: nil)
+    token = page_token ? Result.new(success: true, data: page_token) : resolve_page_token(page_id)
+    return token unless token.success
+
+    result = get("/#{page_id}/subscribed_apps", {}, token.data)
+    return result unless result.success
+
+    apps = Array(result.data)
+    app_id = GlobalConfigService.load('FB_APP_ID', '').to_s
+    app = apps.find { |installed| installed['id'].to_s == app_id }
+
+    Result.new(
+      success: true,
+      data: {
+        success: true,
+        subscribed: app.present?,
+        app_id: app_id.presence,
+        app_name: app && app['name'],
+        subscribed_fields: app && app['subscribed_fields'],
+        all_apps: apps
+      }
+    )
+  end
+
   # questions: array de {type:} — pra CUSTOM, também {key:, label:} e,
   # quando for múltipla escolha, {options: [{key:, value:}, ...]}.
   # privacy_policy_url: a Graph API exige um dos dois (essa ou
