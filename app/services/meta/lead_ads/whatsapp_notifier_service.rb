@@ -68,7 +68,9 @@ module Meta
         end
 
         if sent
-          @submission.update!(notified_whatsapp_at: Time.current)
+          # No modo "só notificar" (Meta::LeadAds::NotifyOnlyService) a submission
+          # é um objeto em memória, nunca persistido — não há o que atualizar.
+          @submission.update!(notified_whatsapp_at: Time.current) if @submission.persisted?
           Result.new(success: true, error: errors.presence&.join('; '))
         else
           Result.new(success: false, error: errors.join('; '))

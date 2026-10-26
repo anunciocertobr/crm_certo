@@ -35,7 +35,8 @@ module Api
           'meta_leads_notify' => %w[
             META_LEADS_NOTIFY_ENABLED META_LEADS_NOTIFY_INBOX_ID
             META_LEADS_NOTIFY_WHATSAPP_NUMBER META_LEADS_NOTIFY_CHANNELS
-            META_LEADS_NOTIFY_CONTENT
+            META_LEADS_NOTIFY_CONTENT META_LEADS_NOTIFY_ONLY
+            META_LEADS_NOTIFY_ONLY_PAGE_IDS
           ],
           # Padrão da conta pra Meta::LeadAds::ImportService — pipeline/fase que
           # um lead de formulário SEM mapeamento próprio (sem MetaLeadForm
