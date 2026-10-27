@@ -46,6 +46,34 @@ class Api::V1::Admin::MetaLeadSubmissionsController < Api::V1::Admin::BaseContro
     error_response(ApiErrorCodes::BUSINESS_RULE_VIOLATION, e.record.errors.full_messages.join(', '), status: :unprocessable_entity)
   end
 
+  # POST /meta_lead_submissions/send_to_meta_crm — envio manual, único e
+  # explícito (botão "Enviar" na tela "Ver Leads"), pro Conversion Leads da
+  # Meta. Funciona só com leadgen_id (nunca precisa de MetaLeadSubmission
+  # existir no banco — é assim que formulários notify_only, que nunca
+  # persistem nada, também conseguem usar isso) e NUNCA grava nada: nem o
+  # payload mandado, nem o resultado. Pode mandar pra mais de um dataset de
+  # uma vez (fan-out), cada um falha isoladamente.
+  def send_to_meta_crm
+    leadgen_id = params[:leadgen_id]
+    dataset_ids = Array(params[:dataset_ids]).map(&:to_s).reject(&:blank?)
+    return error_response(ApiErrorCodes::VALIDATION_ERROR, 'Informe o leadgen_id.', status: :unprocessable_entity) if leadgen_id.blank?
+    return error_response(ApiErrorCodes::VALIDATION_ERROR, 'Informe ao menos um dataset.', status: :unprocessable_entity) if dataset_ids.empty?
+
+    service = Meta::ConversionsApiCrmService.new
+    results = dataset_ids.map do |dataset_id|
+      result = service.send_manual_event(
+        event_name: params[:event_name].presence || 'Lead',
+        leadgen_id: leadgen_id,
+        dataset_id: dataset_id,
+        email: params[:email],
+        phone: params[:phone]
+      )
+      { dataset_id: dataset_id, success: result.success, error: result.error, meta_response: result.data }
+    end
+
+    render json: { success: results.any? { |r| r[:success] }, data: results }
+  end
+
   private
 
   def set_meta_lead_submission

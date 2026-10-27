@@ -214,9 +214,12 @@ Rails.application.routes.draw do
         get 'real_estate/agents/:agent_id/leads', to: 'real_estate_agents#leads'
         resources :meta_lead_forms, only: [:index, :create, :update, :destroy]
         resources :meta_lead_submissions, only: %i[index show update]
+        post 'meta_lead_submissions/send_to_meta_crm', to: 'meta_lead_submissions#send_to_meta_crm'
         get 'meta_lead_notification_settings', to: 'meta_lead_notification_settings#index'
         put 'meta_lead_notification_settings/:form_id', to: 'meta_lead_notification_settings#upsert'
         delete 'meta_lead_notification_settings/:form_id', to: 'meta_lead_notification_settings#destroy'
+        get 'meta_lead_page_settings/:page_id', to: 'meta_lead_page_settings#show'
+        put 'meta_lead_page_settings/:page_id', to: 'meta_lead_page_settings#upsert'
         get 'whatsapp_groups', to: 'whatsapp_groups#index'
       end
 

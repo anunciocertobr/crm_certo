@@ -8,12 +8,15 @@
 # etc) sem reinventar a integração com WhatsApp.
 #
 # Resolução dos destinos (pode ser mais de um canal/número — botão "+" no
-# front), nessa ordem:
-#   1. MetaLeadNotificationSetting do form_id, se existir e enabled=true.
-#   2. Padrão da conta (GlobalConfigService, config 'meta_leads_notify').
-#   3. Nenhum dos dois configurado/habilitado -> não notifica (not_configured).
-# MetaLeadNotificationSetting com enabled=false é opt-out explícito: não cai
-# pro padrão da conta, mesmo que ele exista.
+# front):
+#   1. União de MetaLeadPageSetting#channels (padrão da Página) com
+#      MetaLeadNotificationSetting#effective_channels (do formulário,
+#      quando enabled=true) — nunca sobrescrita, dedupicado por destino
+#      exato. enabled=false no formulário é opt-out só da PARTE dele, a
+#      Página continua valendo.
+#   2. Só cai pro padrão da conta (GlobalConfigService, config
+#      'meta_leads_notify') quando essa união der vazia.
+#   3. Nenhum dos três configurado/habilitado -> não notifica (not_configured).
 #
 # O QUE vai na mensagem (seções) é escolhido por checkboxes no front: a
 # preferência do formulário (MetaLeadNotificationSetting#content_sections)
@@ -113,20 +116,35 @@ module Meta
       end
 
       # Devolve [{inbox_id:, whatsapp_number:} | {inbox_id:, group_jid:,
-      # group_name:}, ...] — nunca um destino só por suposição: se
-      # enabled=true mas a lista de canais está vazia, não cai silenciosamente
-      # pro padrão da conta (seria notificar no lugar errado).
+      # group_name:}, ...]. União dos canais da Página (MetaLeadPageSetting)
+      # com os do formulário (MetaLeadNotificationSetting), nunca
+      # sobrescrita — um lead pode notificar os dois ao mesmo tempo,
+      # dedupicado por destino exato. `enabled: false` no formulário é opt-
+      # out só da PARTE do formulário (a página continua valendo); só cai
+      # pro padrão da conta quando a união dos dois níveis dá vazia —
+      # mesma regra de "nunca um destino por suposição" de antes.
       def resolve_destinations
-        s = setting
-        return [] if s && !s.enabled
-
-        if s&.enabled
-          return s.effective_channels.filter_map { |c| channel_destination(c) }
-        end
+        union = (page_channel_destinations + form_channel_destinations)
+                .uniq { |d| [d[:inbox_id], d[:whatsapp_number] || d[:group_jid]] }
+        return union if union.any?
 
         return [] unless account_default_enabled?
 
         account_default_channels
+      end
+
+      def form_channel_destinations
+        s = setting
+        return [] if s.nil? || !s.enabled
+
+        s.effective_channels.filter_map { |c| channel_destination(c) }
+      end
+
+      def page_channel_destinations
+        page_setting = MetaLeadPageSetting.find_by(page_id: @submission.page_id)
+        return [] unless page_setting
+
+        Array(page_setting.channels).filter_map { |c| channel_destination(c) }
       end
 
       # Preferência do formulário (se configurada) tem prioridade sobre o

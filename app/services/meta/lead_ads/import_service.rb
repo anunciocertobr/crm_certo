@@ -67,7 +67,7 @@ module Meta
         # Meta::LeadAds::WhatsappNotifierService sobre a resolução do destino).
         Meta::LeadAds::WhatsappNotifierService.call(submission)
 
-        targets = pipeline_targets_for(lead_form)
+        targets = pipeline_targets_for(lead_form, page_id: submission.page_id)
 
         if targets.empty?
           submission.update!(status: 'unmapped_form') unless submission.status == 'unmapped_form'
@@ -164,14 +164,26 @@ module Meta
         "meta_lead_import:#{leadgen_id}"
       end
 
-      def pipeline_targets_for(lead_form)
-        if lead_form
-          lead_form.meta_lead_form_pipelines.includes(:pipeline, :pipeline_stage)
+      # União dos pipelines da Página (MetaLeadPageSetting) com os do
+      # formulário (MetaLeadFormPipeline) — nunca sobrescrita, um lead pode
+      # cair nos dois ao mesmo tempo, dedupicado por par Pipeline+Estágio
+      # igual. Exceção: mode: 'notify_only' é a escolha explícita de nunca
+      # criar card pra esse formulário — ignora o padrão da página também
+      # (senão configurar um pipeline pra página reativaria card em todo
+      # formulário marcado notify_only de propósito).
+      def pipeline_targets_for(lead_form, page_id:)
+        return [] if lead_form&.mode == 'notify_only'
+
+        form_targets = lead_form ? lead_form.meta_lead_form_pipelines.includes(:pipeline, :pipeline_stage) : []
+        page_targets = MetaLeadPageSetting.find_by(page_id: page_id)&.meta_lead_page_pipelines&.includes(:pipeline, :pipeline_stage) || []
+
+        combined = (page_targets.to_a + form_targets.to_a)
+                   .uniq { |p| [p.pipeline_id, p.pipeline_stage_id] }
                    .map { |p| PipelineTarget.new(p.pipeline, p.pipeline_stage) }
-        else
-          pipeline, stage = default_pipeline_and_stage
-          pipeline && stage ? [PipelineTarget.new(pipeline, stage)] : []
-        end
+        return combined if combined.any?
+
+        pipeline, stage = default_pipeline_and_stage
+        pipeline && stage ? [PipelineTarget.new(pipeline, stage)] : []
       end
 
       # Padrão da conta (Configurações > Admin, tipo 'meta_leads_pipeline_default')

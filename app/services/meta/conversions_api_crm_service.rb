@@ -65,7 +65,63 @@ module Meta
       post("/#{dataset_id}/events", body)
     end
 
+    # Envio MANUAL (botão "Enviar pro Meta" na tela "Ver Leads") — paralelo
+    # ao send_event acima (que é do fluxo AUTOMÁTICO disparado por mudança
+    # de fase/qualidade do Kanban, intocado). Diferenças de propósito:
+    #   - dataset_id é parâmetro obrigatório da chamada (quem chama decide,
+    #     normalmente o padrão da Página — ver MetaLeadPageSetting — ou um
+    #     valor digitado na hora), não lido de GlobalConfig.
+    #   - não checa META_CRM_ENABLED/META_CRM_DATASET_ID (configs do fluxo
+    #     automático) — só partner_agent + token, que são compartilhados.
+    #   - aceita email/phone pra preencher em/ph (hash SHA256) no user_data,
+    #     que melhora o match da Meta — o fluxo automático nunca tinha isso.
+    # Nunca persiste nada (nem o payload, nem o resultado) no nosso banco —
+    # pedido explícito do usuário.
+    def send_manual_event(event_name:, leadgen_id:, dataset_id:, email: nil, phone: nil)
+      partner_agent = GlobalConfigService.load('META_CRM_PARTNER_AGENT', nil)
+      if partner_agent.blank?
+        return Result.new(success: false, error: 'Falta configurar o partner_agent (combinado com o representante da Meta).')
+      end
+      if @token.blank?
+        return Result.new(success: false, error: 'Nenhuma Página do Facebook conectada com token válido.')
+      end
+
+      user_data = { lead_id: leadgen_id }
+      user_data[:em] = [hash_sha256(email)] if email.present?
+      user_data[:ph] = [hash_sha256(normalize_phone_digits(phone))] if phone.present?
+
+      body = {
+        data: [
+          {
+            event_name: event_name,
+            event_time: Time.current.to_i,
+            action_source: 'system_generated',
+            user_data: user_data,
+            custom_data: { lead_event_source: 'Anuncio Certo CRM', event_source: 'crm' },
+            partner_agent: partner_agent
+          }
+        ]
+      }
+
+      post("/#{dataset_id}/events", body)
+    end
+
     private
+
+    # Normalização pro hash de telefone — minúsculo/sem espaço não se aplica
+    # a número, só precisa ficar só com dígitos + DDI (mesma convenção de
+    # Meta::LeadAds::ImportService#normalize_br_phone: assume Brasil quando
+    # faltar o código do país).
+    def normalize_phone_digits(raw)
+      digits = raw.to_s.gsub(/\D/, '')
+      digits.start_with?('55') ? digits : "55#{digits}"
+    end
+
+    # Hash exigido pela Meta pra em/ph em texto puro: SHA256 em hexadecimal,
+    # minúsculo e sem espaço nas bordas (doc da Conversions API).
+    def hash_sha256(value)
+      Digest::SHA256.hexdigest(value.to_s.strip.downcase)
+    end
 
     def post(path, body)
       uri = URI("#{BASE_URL}#{path}")
