@@ -192,6 +192,39 @@ class Whatsapp::Providers::EvolutionService < Whatsapp::Providers::BaseService
     nil
   end
 
+  # Lista os grupos que essa instância participa — usado pelo seletor de
+  # grupo na notificação de leads (ver Meta::LeadAds::WhatsappNotifierService
+  # e Api::V1::Admin::WhatsappGroupsController). Diferente de
+  # fetch_group_subject (nome de 1 grupo já conhecido), aqui é a listagem
+  # completa pra alimentar um picker com busca no front. Cache curto (2min,
+  # não 1h como o subject) só pra não martelar a API se o usuário abrir/
+  # fechar o seletor várias vezes — a lista pode crescer (grupo novo) com
+  # mais frequência do que o nome de um grupo já existente muda.
+  def fetch_all_groups
+    return [] if api_base_path.blank? || instance_name.blank?
+
+    cache_key = "evolution:all_groups:#{whatsapp_channel.id}"
+    cached = Redis::Alfred.get(cache_key)
+    return JSON.parse(cached) if cached.present?
+
+    url = "#{api_base_path}/group/fetchAllGroups/#{instance_name}?getParticipants=false"
+    response = HTTParty.get(url, headers: api_headers, timeout: 10)
+    return [] unless response.success?
+
+    parsed = response.parsed_response
+    groups = Array(parsed).filter_map do |g|
+      jid = g['id'].presence
+      next nil if jid.blank?
+
+      { 'jid' => jid, 'name' => g['subject'].presence || jid }
+    end
+    Redis::Alfred.setex(cache_key, groups.to_json, 2.minutes)
+    groups
+  rescue StandardError => e
+    Rails.logger.warn "Evolution API: fetch_all_groups failed: #{e.message}"
+    []
+  end
+
   def subscribe_to_webhooks
     # Evolution API webhook subscription if needed
     Rails.logger.info 'Evolution API webhook subscription not implemented'

@@ -156,6 +156,35 @@ class Whatsapp::Providers::EvolutionGoService < Whatsapp::Providers::BaseService
     }
   end
 
+  # Mesmo papel de Whatsapp::Providers::EvolutionService#fetch_all_groups,
+  # pro fork Evolution Go — contrato REST idêntico, só api_base_path/
+  # instance_name/api_headers mudam de fonte (provider_config/GlobalConfig
+  # próprios desta classe).
+  def fetch_all_groups
+    return [] if api_base_path.blank? || instance_name.blank?
+
+    cache_key = "evolution_go:all_groups:#{whatsapp_channel.id}"
+    cached = Redis::Alfred.get(cache_key)
+    return JSON.parse(cached) if cached.present?
+
+    url = "#{api_base_path}/group/fetchAllGroups/#{instance_name}?getParticipants=false"
+    response = HTTParty.get(url, headers: api_headers, timeout: 10)
+    return [] unless response.success?
+
+    parsed = response.parsed_response
+    groups = Array(parsed).filter_map do |g|
+      jid = g['id'].presence
+      next nil if jid.blank?
+
+      { 'jid' => jid, 'name' => g['subject'].presence || jid }
+    end
+    Redis::Alfred.setex(cache_key, groups.to_json, 2.minutes)
+    groups
+  rescue StandardError => e
+    Rails.logger.warn "Evolution Go API: fetch_all_groups failed: #{e.message}"
+    []
+  end
+
   def media_url(media_id)
     # Evolution Go API media endpoint
     "#{api_base_path}/media/#{media_id}"

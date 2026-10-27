@@ -32,7 +32,7 @@ class Api::V1::Admin::MetaLeadNotificationSettingsController < Api::V1::Admin::B
 
   def meta_lead_notification_setting_params
     params.permit(:page_id, :form_name, :enabled, :inbox_id, :whatsapp_number,
-                  content_sections: [], channels: [:inbox_id, :whatsapp_number])
+                  content_sections: [], channels: [:inbox_id, :whatsapp_number, :group_jid, :group_name])
   end
 
   def serialize(setting)

@@ -2,12 +2,13 @@ class Api::V1::Admin::MetaLeadFormsController < Api::V1::Admin::BaseController
   before_action :set_meta_lead_form, only: %i[update destroy]
 
   def index
-    forms = MetaLeadForm.includes(:pipeline, :pipeline_stage).order(created_at: :desc)
+    forms = MetaLeadForm.includes(meta_lead_form_pipelines: %i[pipeline pipeline_stage]).order(created_at: :desc)
     render json: { success: true, data: forms.map { |f| serialize(f) } }
   end
 
   def create
     form = MetaLeadForm.new(meta_lead_form_params)
+    assign_pipelines(form)
     if form.save
       reprocess_pending_submissions(form)
       render json: { success: true, data: serialize(form.reload) }, status: :created
@@ -17,7 +18,9 @@ class Api::V1::Admin::MetaLeadFormsController < Api::V1::Admin::BaseController
   end
 
   def update
-    if @meta_lead_form.update(meta_lead_form_params)
+    @meta_lead_form.assign_attributes(meta_lead_form_params)
+    assign_pipelines(@meta_lead_form)
+    if @meta_lead_form.save
       reprocess_pending_submissions(@meta_lead_form)
       render json: { success: true, data: serialize(@meta_lead_form.reload) }
     else
@@ -31,6 +34,19 @@ class Api::V1::Admin::MetaLeadFormsController < Api::V1::Admin::BaseController
   end
 
   private
+
+  # Sempre substitui a lista inteira pela recebida (o front manda o estado
+  # completo desejado, não um diff) — destroy_all roda na hora (não espera o
+  # save), e os novos ainda não salvos entram no mesmo save do form pela
+  # autosave padrão de has_many.
+  def assign_pipelines(form)
+    return unless params.key?(:pipelines)
+
+    form.meta_lead_form_pipelines.destroy_all if form.persisted?
+    Array(params[:pipelines]).each do |p|
+      form.meta_lead_form_pipelines.build(pipeline_id: p[:pipeline_id], pipeline_stage_id: p[:pipeline_stage_id])
+    end
+  end
 
   # Um formulário recém-mapeado (ou remapeado pra outro pipeline/estágio)
   # libera na hora qualquer lead que já tinha chegado sem mapeamento —
@@ -46,7 +62,7 @@ class Api::V1::Admin::MetaLeadFormsController < Api::V1::Admin::BaseController
   end
 
   def meta_lead_form_params
-    params.permit(:page_id, :form_id, :form_name, :pipeline_id, :pipeline_stage_id, :active)
+    params.permit(:page_id, :form_id, :form_name, :mode, :active)
   end
 
   def serialize(form)
@@ -56,10 +72,15 @@ class Api::V1::Admin::MetaLeadFormsController < Api::V1::Admin::BaseController
       form_id: form.form_id,
       form_name: form.form_name,
       active: form.active,
-      pipeline_id: form.pipeline_id,
-      pipeline_stage_id: form.pipeline_stage_id,
-      pipeline_name: form.pipeline&.name,
-      pipeline_stage_name: form.pipeline_stage&.name,
+      mode: form.mode,
+      pipelines: form.meta_lead_form_pipelines.map do |p|
+        {
+          pipeline_id: p.pipeline_id,
+          pipeline_stage_id: p.pipeline_stage_id,
+          pipeline_name: p.pipeline&.name,
+          pipeline_stage_name: p.pipeline_stage&.name
+        }
+      end,
       created_at: form.created_at&.iso8601
     }
   end

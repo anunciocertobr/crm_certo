@@ -60,11 +60,11 @@ module Meta
 
         errors = []
         sent = false
-        destinations.each do |inbox_id, target_phone|
-          send_to(inbox_id, target_phone)
+        destinations.each do |destination|
+          send_to(destination)
           sent = true
         rescue StandardError => e
-          errors << "#{target_phone}: #{e.message}"
+          errors << "#{destination[:group_jid] || destination[:whatsapp_number]}: #{e.message}"
         end
 
         if sent
@@ -82,20 +82,25 @@ module Meta
 
       private
 
-      def send_to(inbox_id, target_phone)
-        inbox = Inbox.find_by(id: inbox_id)
-        raise "inbox_not_found(#{inbox_id})" unless inbox
+      def send_to(destination)
+        inbox = Inbox.find_by(id: destination[:inbox_id])
+        raise "inbox_not_found(#{destination[:inbox_id]})" unless inbox
 
-        contact_inbox = ContactInboxWithContactBuilder.new(
-          inbox: inbox,
-          contact_attributes: { phone_number: normalize_phone(target_phone), name: contact_name }
-        ).perform
+        if destination[:group_jid].present?
+          contact_inbox = group_contact_inbox(inbox, destination[:group_jid], destination[:group_name])
+          conversation_params = ActionController::Parameters.new(
+            additional_attributes: { evolution_chat_id: destination[:group_jid] }
+          ).permit!
+        else
+          contact_inbox = ContactInboxWithContactBuilder.new(
+            inbox: inbox,
+            contact_attributes: { phone_number: normalize_phone(destination[:whatsapp_number]), name: contact_name }
+          ).perform
+          conversation_params = ActionController::Parameters.new({}).permit!
+        end
         raise 'contact_error' unless contact_inbox
 
-        conversation = ConversationBuilder.new(
-          params: ActionController::Parameters.new({}).permit!,
-          contact_inbox: contact_inbox
-        ).perform
+        conversation = ConversationBuilder.new(params: conversation_params, contact_inbox: contact_inbox).perform
 
         message = conversation.messages.new(
           inbox_id: conversation.inbox_id,
@@ -107,16 +112,16 @@ module Meta
         message.save!
       end
 
-      # Devolve [[inbox_id, whatsapp_number], ...] — nunca um par só por
-      # suposição: se enabled=true mas a lista de canais está vazia, não cai
-      # silenciosamente pro padrão da conta (seria notificar no lugar errado).
+      # Devolve [{inbox_id:, whatsapp_number:} | {inbox_id:, group_jid:,
+      # group_name:}, ...] — nunca um destino só por suposição: se
+      # enabled=true mas a lista de canais está vazia, não cai silenciosamente
+      # pro padrão da conta (seria notificar no lugar errado).
       def resolve_destinations
         s = setting
         return [] if s && !s.enabled
 
         if s&.enabled
-          channels = s.effective_channels
-          return channels.filter_map { |c| [c['inbox_id'], c['whatsapp_number']] if c['inbox_id'].present? && c['whatsapp_number'].present? }
+          return s.effective_channels.filter_map { |c| channel_destination(c) }
         end
 
         return [] unless account_default_enabled?
@@ -160,7 +165,7 @@ module Meta
         raw = GlobalConfigService.load('META_LEADS_NOTIFY_CHANNELS', nil)
         if raw.present?
           parsed = JSON.parse(raw) rescue [] # rubocop:disable Style/RescueModifier -- config legível por humanos no admin, JSON inválido não deve derrubar a notificação
-          return Array(parsed).filter_map { |c| [c['inbox_id'], c['whatsapp_number']] if c['inbox_id'].present? && c['whatsapp_number'].present? }
+          return Array(parsed).filter_map { |c| channel_destination(c) }
         end
 
         # Fallback: quem configurou antes de META_LEADS_NOTIFY_CHANNELS existir.
@@ -168,7 +173,28 @@ module Meta
         legacy_phone = GlobalConfigService.load('META_LEADS_NOTIFY_WHATSAPP_NUMBER', nil)
         return [] if legacy_inbox.blank? || legacy_phone.blank?
 
-        [[legacy_inbox, legacy_phone]]
+        [{ inbox_id: legacy_inbox, whatsapp_number: legacy_phone }]
+      end
+
+      # Canal salvo (jsonb) pode ser destino número ou grupo — grupo tem
+      # prioridade se os dois vierem preenchidos por engano.
+      def channel_destination(c)
+        return nil if c['inbox_id'].blank?
+        return { inbox_id: c['inbox_id'], group_jid: c['group_jid'], group_name: c['group_name'] } if c['group_jid'].present?
+        return { inbox_id: c['inbox_id'], whatsapp_number: c['whatsapp_number'] } if c['whatsapp_number'].present?
+
+        nil
+      end
+
+      # Mesmo padrão usado pra mensagem recebida de um grupo (ver
+      # Whatsapp::EvolutionHandlers::MessagesUpsert#set_group_contact) — aqui
+      # é criado proativamente, não a partir de uma mensagem recebida.
+      def group_contact_inbox(inbox, group_jid, group_name)
+        ContactInboxWithContactBuilder.new(
+          inbox: inbox,
+          source_id: group_jid,
+          contact_attributes: { identifier: group_jid, type: 'group', name: group_name.presence || 'Grupo WhatsApp' }
+        ).perform
       end
 
       def account_default_enabled?

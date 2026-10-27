@@ -1,10 +1,16 @@
 # Substitui os fluxos n8n "ellie/paiva corretora baixar leads formulario
 # Meta" — o webhook `leadgen` do Meta só avisa o ID (Webhooks::FacebookController
 # -> Webhooks::FacebookLeadgenEventsJob), este serviço busca o lead completo
-# na Graph API (Meta::AdsManagerService#lead_detail), resolve o
-# Contato/PipelineItem via o mapeamento salvo em MetaLeadForm, e nunca
-# descarta um lead sem mapeamento — ele fica em MetaLeadSubmission até
-# alguém configurar o formulário em Configurações > Lead Ads (Meta).
+# na Graph API (Meta::AdsManagerService#lead_detail) e decide o que fazer
+# pelo MetaLeadForm do form_id encontrado:
+#   - sem mapeamento, ou mode: 'pipeline' -> persiste em MetaLeadSubmission e
+#     cria Contato + 1 PipelineItem por Pipeline/Estágio mapeado (ver
+#     MetaLeadFormPipeline), nunca descartando um lead sem mapeamento — ele
+#     fica em MetaLeadSubmission (status 'unmapped_form') até alguém mapear.
+#   - mode: 'notify_only' -> só notifica por WhatsApp, nunca persiste nada
+#     (nem MetaLeadSubmission, nem Contato, nem PipelineItem) — era o papel
+#     do antigo Meta::LeadAds::NotifyOnlyService, hoje substituído por essa
+#     escolha por formulário em vez de uma lista global de page_id.
 module Meta
   module LeadAds
     class ImportService
@@ -17,6 +23,14 @@ module Meta
         name: /nome|name/i
       }.freeze
 
+      # Dedup do leadgen_id funciona pros dois modos (a Meta pode reenviar o
+      # mesmo webhook) — pro modo 'pipeline' o índice único de leadgen_id em
+      # MetaLeadSubmission já protege, mas pro 'notify_only' nada é persistido,
+      # então o cache é a única defesa contra notificar duas vezes.
+      DEDUP_TTL = 7.days
+
+      PipelineTarget = Struct.new(:pipeline, :pipeline_stage)
+
       def self.import_from_webhook(page_id:, leadgen_id:)
         new.import_from_webhook(page_id: page_id, leadgen_id: leadgen_id)
       end
@@ -26,6 +40,7 @@ module Meta
       end
 
       def import_from_webhook(page_id:, leadgen_id:)
+        return if Rails.cache.exist?(dedup_cache_key(leadgen_id))
         return if MetaLeadSubmission.exists?(leadgen_id: leadgen_id)
 
         result = Meta::AdsManagerService.new.lead_detail(page_id: page_id, leadgen_id: leadgen_id)
@@ -35,20 +50,13 @@ module Meta
         end
 
         data = result.data
-        submission = MetaLeadSubmission.create!(
-          leadgen_id: leadgen_id,
-          page_id: page_id,
-          form_id: data['form_id'],
-          ad_id: data['ad_id'],
-          adset_id: data['adset_id'],
-          campaign_id: data['campaign_id'],
-          ad_name: data['ad_name'],
-          adset_name: data['adset_name'],
-          campaign_name: data['campaign_name'],
-          field_data: data['field_data'] || [],
-          lead_created_time: data['created_time']
-        )
-        process(submission)
+        lead_form = MetaLeadForm.find_by(form_id: data['form_id'], active: true)
+
+        if lead_form&.mode == 'notify_only'
+          import_notify_only(page_id: page_id, leadgen_id: leadgen_id, data: data)
+        else
+          import_and_persist(page_id: page_id, leadgen_id: leadgen_id, data: data)
+        end
       end
 
       def process(submission)
@@ -59,9 +67,9 @@ module Meta
         # Meta::LeadAds::WhatsappNotifierService sobre a resolução do destino).
         Meta::LeadAds::WhatsappNotifierService.call(submission)
 
-        pipeline, pipeline_stage = lead_form ? [lead_form.pipeline, lead_form.pipeline_stage] : default_pipeline_and_stage
+        targets = pipeline_targets_for(lead_form)
 
-        unless pipeline && pipeline_stage
+        if targets.empty?
           submission.update!(status: 'unmapped_form') unless submission.status == 'unmapped_form'
           return
         end
@@ -77,28 +85,94 @@ module Meta
           return
         end
 
-        existing_item = pipeline.pipeline_items.find_by(contact: contact, completed_at: nil)
-        pipeline_item = existing_item || pipeline.add_contact(contact, pipeline_stage, nil)
+        first_pipeline_item = nil
+        targets.each do |target|
+          existing_item = target.pipeline.pipeline_items.find_by(contact: contact, completed_at: nil)
+          pipeline_item = existing_item || target.pipeline.add_contact(contact, target.pipeline_stage, nil)
+          first_pipeline_item ||= pipeline_item
+
+          # Primeiro evento do funil pro "Conversion Leads" da Meta (ver
+          # Meta::ConversionsApiCrmService) — só no card novo de verdade, não
+          # quando reaproveita um já existente (senão reenviaria "Lead" toda
+          # vez que a mesma pessoa manda outro formulário).
+          Meta::SendCrmLeadStatusJob.perform_later(pipeline_item.id, event_name: 'Lead') if existing_item.nil?
+        end
 
         submission.update!(
           meta_lead_form: lead_form,
           contact: contact,
-          pipeline_item: pipeline_item,
+          pipeline_item: first_pipeline_item,
           status: 'processed',
           error_message: nil
         )
-
-        # Primeiro evento do funil pro "Conversion Leads" da Meta (ver
-        # Meta::ConversionsApiCrmService) — só no card novo de verdade, não
-        # quando reaproveita um já existente (senão reenviaria "Lead" toda
-        # vez que a mesma pessoa manda outro formulário).
-        Meta::SendCrmLeadStatusJob.perform_later(pipeline_item.id, event_name: 'Lead') if existing_item.nil?
       rescue StandardError => e
         Rails.logger.error("Meta::LeadAds::ImportService: #{e.message}")
         submission.update(status: 'error', error_message: e.message)
       end
 
       private
+
+      def import_and_persist(page_id:, leadgen_id:, data:)
+        submission = MetaLeadSubmission.create!(
+          leadgen_id: leadgen_id,
+          page_id: page_id,
+          form_id: data['form_id'],
+          ad_id: data['ad_id'],
+          adset_id: data['adset_id'],
+          campaign_id: data['campaign_id'],
+          ad_name: data['ad_name'],
+          adset_name: data['adset_name'],
+          campaign_name: data['campaign_name'],
+          field_data: data['field_data'] || [],
+          lead_created_time: data['created_time']
+        )
+        process(submission)
+        Rails.cache.write(dedup_cache_key(leadgen_id), true, expires_in: DEDUP_TTL)
+      rescue ActiveRecord::RecordNotUnique
+        # Webhook reenviado entre o check de dedup e o create! (corrida rara)
+        # — já existe/já está sendo processado, nada a fazer.
+        nil
+      end
+
+      # Objeto em memória só pra alimentar o WhatsappNotifierService (que lê
+      # field_data/ad_id/adset_id/form_id e o nome do formulário) — nunca é
+      # salvo, igual o antigo Meta::LeadAds::NotifyOnlyService#build_submission.
+      def import_notify_only(page_id:, leadgen_id:, data:)
+        submission = MetaLeadSubmission.new(
+          leadgen_id: leadgen_id,
+          page_id: page_id,
+          form_id: data['form_id'],
+          ad_id: data['ad_id'],
+          adset_id: data['adset_id'],
+          campaign_id: data['campaign_id'],
+          ad_name: data['ad_name'],
+          adset_name: data['adset_name'],
+          campaign_name: data['campaign_name'],
+          field_data: data['field_data'] || [],
+          lead_created_time: data['created_time'],
+          status: 'processed'
+        )
+        result = Meta::LeadAds::WhatsappNotifierService.call(submission)
+        if result.success
+          Rails.cache.write(dedup_cache_key(leadgen_id), true, expires_in: DEDUP_TTL)
+        else
+          Rails.logger.error("Meta::LeadAds::ImportService: notificação (notify_only) #{leadgen_id} falhou: #{result.error}")
+        end
+      end
+
+      def dedup_cache_key(leadgen_id)
+        "meta_lead_import:#{leadgen_id}"
+      end
+
+      def pipeline_targets_for(lead_form)
+        if lead_form
+          lead_form.meta_lead_form_pipelines.includes(:pipeline, :pipeline_stage)
+                   .map { |p| PipelineTarget.new(p.pipeline, p.pipeline_stage) }
+        else
+          pipeline, stage = default_pipeline_and_stage
+          pipeline && stage ? [PipelineTarget.new(pipeline, stage)] : []
+        end
+      end
 
       # Padrão da conta (Configurações > Admin, tipo 'meta_leads_pipeline_default')
       # pra formulário sem MetaLeadForm próprio — evita que o lead fique preso

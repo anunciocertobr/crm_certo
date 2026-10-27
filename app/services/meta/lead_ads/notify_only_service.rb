@@ -1,5 +1,15 @@
 module Meta
   module LeadAds
+    # OBSOLETO (27/10/2026): substituído por MetaLeadForm#mode == 'notify_only',
+    # que faz a mesma coisa (ver Meta::LeadAds::ImportService#import_notify_only)
+    # mas escolhido por FORMULÁRIO em vez de uma lista global de page_id — a
+    # escolha por página inteira não permitia dois formulários da mesma página
+    # terem comportamentos diferentes. Mantido só como referência/fallback
+    # manual; Webhooks::FacebookLeadgenEventsJob não chama mais esta classe.
+    # Antes de apagar de vez: confirmar que nenhum form_id ainda depende só da
+    # config antiga (META_LEADS_NOTIFY_ONLY_PAGE_IDS) — migrar pra um
+    # MetaLeadForm com mode: 'notify_only' primeiro.
+    #
     # Caminho "só notificar": busca o lead na Graph API e manda pro WhatsApp
     # configurado em MetaLeadNotificationSetting/GlobalConfig, sem criar
     # MetaLeadSubmission, Contact de lead ou PipelineItem. Usado pelos webhooks
