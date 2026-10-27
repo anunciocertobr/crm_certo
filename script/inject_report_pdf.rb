@@ -1,4 +1,7 @@
-# Insere o módulo de PDF (public/report-pdf.v1.js) no HTML do relatório.
+# Insere o módulo de PDF (public/report-pdf.v2.js) no HTML do relatório.
+# Só serve pra instalação NOVA (o marcador abaixo aborta se já estiver lá) —
+# pra trocar a versão de um asset já injetado, ver
+# script/update_report_pdf_asset.rb.
 #
 # O HTML do item `mtlsot4v-cf6f9s` de `dashboard-menu-items` é a única fonte
 # que serve os DOIS pontos de entrada: a página pública (Public::ReportHtml
@@ -21,7 +24,7 @@ module ReportPdfInjector
   SCOPE = 'dashboard-menu-items'
   ITEM_ID = 'mtlsot4v-cf6f9s'
   MARKER = '<!-- evo:report-pdf -->'
-  ASSET = 'https://crmcerto.anunciocertobr.com.br/report-pdf.v1.js'
+  ASSET = 'https://crmcerto.anunciocertobr.com.br/report-pdf.v2.js'
   TAG = "#{MARKER}\n<script src=\"#{ASSET}\" defer></script>\n#{MARKER}"
 
   module_function
