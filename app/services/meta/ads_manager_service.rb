@@ -1673,13 +1673,23 @@ class Meta::AdsManagerService
   # Criar um formulário pela Graph API NÃO assina a Página automaticamente
   # (só o botão "Criar formulário" do Gerenciador da Meta faz isso); por isso
   # a criação/duplicação na UI também chama este método.
+  #
+  # ATENÇÃO: POST /subscribed_apps SUBSTITUI a lista inteira de
+  # subscribed_fields do app nessa Página, não soma (confirmado contra a API
+  # real em 27/10/2026 — causou um incidente real: apagou messages/feed de
+  # uma Página de produção que só devia GANHAR leadgen). Por isso é
+  # obrigatório buscar os campos já assinados primeiro e mandar a UNIÃO.
   def subscribe_leadgen_webhook(page_id:)
     token = resolve_page_token(page_id)
     return token unless token.success
 
+    existing = leadgen_subscription(page_id: page_id, page_token: token.data)
+    current_fields = existing.success ? Array(existing.data[:subscribed_fields]) : []
+    fields = (current_fields + ['leadgen']).uniq
+
     result = post(
       "/#{page_id}/subscribed_apps",
-      { subscribed_fields: ['leadgen'].to_json },
+      { subscribed_fields: fields.to_json },
       token.data
     )
     return result unless result.success
