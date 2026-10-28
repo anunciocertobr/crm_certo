@@ -55,20 +55,42 @@ class MercadoLivre::Client
   # pictures); categorias específicas (ex. eletrônicos exigem `brand`/
   # `model` como atributo tipado, não string livre) provavelmente vão
   # precisar de ajuste assim que testado contra uma categoria real.
+  #
+  # catalog_product_id: categorias populares/padronizadas (ex. MLB11172/
+  # Consoles) EXIGEM publicação em catálogo — a API recusa title/
+  # attributes livres nelas (confirmado ao vivo 28/10/2026, erro
+  # "fields [title] are invalid for requested call"). Quando presente,
+  # manda um corpo reduzido (catalog_product_id + catalog_listing: true) —
+  # a ficha técnica/fotos vêm do produto de catálogo da própria ML, não dá
+  # (nem precisa) pra mandar title/attributes/pictures junto.
   def publish_item(category_id:, title:, price:, quantity:, condition: 'new', listing_type_id: 'gold_special',
-                    description: nil, picture_urls: [], buying_mode: 'buy_it_now', attributes: [])
-    body = {
-      title: title,
-      category_id: category_id,
-      price: price,
-      currency_id: 'BRL',
-      available_quantity: quantity,
-      buying_mode: buying_mode,
-      condition: condition,
-      listing_type_id: listing_type_id,
-      pictures: picture_urls.map { |url| { source: url } },
-      attributes: attributes.presence
-    }.compact
+                    description: nil, picture_urls: [], buying_mode: 'buy_it_now', attributes: [], family_name: nil,
+                    catalog_product_id: nil)
+    body = if catalog_product_id.present?
+             {
+               catalog_product_id: catalog_product_id,
+               catalog_listing: true,
+               price: price,
+               currency_id: 'BRL',
+               available_quantity: quantity,
+               condition: condition,
+               listing_type_id: listing_type_id
+             }.compact
+           else
+             {
+               title: title,
+               category_id: category_id,
+               price: price,
+               currency_id: 'BRL',
+               available_quantity: quantity,
+               buying_mode: buying_mode,
+               condition: condition,
+               listing_type_id: listing_type_id,
+               pictures: picture_urls.map { |url| { source: url } },
+               attributes: attributes.presence,
+               family_name: family_name.presence
+             }.compact
+           end
     item = post('/items', body)
     return item if description.blank? || item['id'].blank?
 

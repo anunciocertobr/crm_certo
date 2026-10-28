@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_10_28_190000) do
+ActiveRecord::Schema[7.1].define(version: 2026_10_28_193000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -1974,6 +1974,7 @@ ActiveRecord::Schema[7.1].define(version: 2026_10_28_190000) do
     t.datetime "ml_published_at"
     t.text "ml_sync_error"
     t.jsonb "ml_attributes", default: {}, null: false
+    t.string "ml_catalog_product_id", limit: 50
     t.boolean "publish_shopee", default: false, null: false
     t.string "shopee_category_id", limit: 50
     t.string "shopee_item_id", limit: 50

@@ -10,6 +10,20 @@
 # obrigatórios — descobrir via `GET /categories/:id/attributes` (campo
 # `tags.required`) antes de publicar numa categoria nova; não tem como
 # saber sem checar, a API só recusa.
+#
+# Segunda rejeição, mesmo teste: `family_name` (campo de nível raiz do
+# item, não um atributo de categoria — modelo "User Product" da ML, erro
+# 369 "body.required_fields"). É texto livre descrevendo a família do
+# produto (até 120 caracteres), responsabilidade do vendedor/integrador
+# preencher — sem valor padrão óbvio da própria ML, uso o nome do produto.
+#
+# Terceira rejeição, mesmo teste: mesmo com attributes+family_name, a API
+# recusou `title` pra essa categoria ("fields [title] are invalid for
+# requested call") — categoria exige publicação em CATÁLOGO (produto
+# padronizado, não listagem livre). Quando `product.ml_catalog_product_id`
+# está preenchido (achar via GET /products/search?domain_id=...&q=...,
+# autenticado), publica em modo catálogo em vez de title/attributes
+# livres — ver migration 20261028193000 e MercadoLivre::Client#publish_item.
 class MercadoLivre::PublishProductService
   Result = Struct.new(:success, :error, keyword_init: true)
 
@@ -43,7 +57,9 @@ class MercadoLivre::PublishProductService
       listing_type_id: product.ml_listing_type.presence || 'gold_special',
       description: product.description,
       picture_urls: product.media.to_a.filter_map { |m| m['url'] },
-      attributes: build_attributes(product)
+      attributes: build_attributes(product),
+      family_name: product.name.to_s.truncate(120),
+      catalog_product_id: product.ml_catalog_product_id.presence
     )
     product.update!(ml_item_id: item['id'], ml_published_at: Time.current, ml_sync_error: nil)
     Result.new(success: true)
