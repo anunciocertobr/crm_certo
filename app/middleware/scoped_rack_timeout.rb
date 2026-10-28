@@ -1,6 +1,10 @@
 # Dá um timeout maior só pras rotas de insights/business_managers da Meta
 # (podem levar bem mais que o padrão por causa de paginação da Graph API e
-# de dias de servidor lento — ver incidente 2026-10-07), sem mexer no
+# de dias de servidor lento — ver incidente 2026-10-07) e pra
+# admin/whatsapp_groups (fetchAllGroups da Evolution demora ~17s pra
+# instância com vários grupos — confirmado ao vivo 2026-10-28, o timeout
+# de 15s matava a request antes da Evolution responder, e o frontend
+# mostrava "nenhum grupo encontrado" em vez do 500 real), sem mexer no
 # timeout do resto do sistema.
 #
 # `rack-timeout` 0.6.3 não tem NENHUM jeito suportado de variar o timeout
@@ -15,7 +19,7 @@
 # instâncias de Rack::Timeout com configs diferentes e decidir qual delas
 # processa a request ANTES de chamar a aplicação — é o que esta classe faz.
 class ScopedRackTimeout
-  EXTENDED_PATTERN = %r{/meta_ads/(insights|business_managers)(?:/|\z|\?)}.freeze
+  EXTENDED_PATTERN = %r{/meta_ads/(insights|business_managers)(?:/|\z|\?)|/admin/whatsapp_groups(?:/|\z|\?)}.freeze
 
   def initialize(app, default_timeout:, extended_timeout:)
     @default  = Rack::Timeout.new(app, service_timeout: default_timeout)
