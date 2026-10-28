@@ -70,6 +70,7 @@ class MercadoLivre::Client
              {
                catalog_product_id: catalog_product_id,
                catalog_listing: true,
+               category_id: category_id,
                price: price,
                currency_id: 'BRL',
                available_quantity: quantity,
@@ -92,7 +93,10 @@ class MercadoLivre::Client
              }.compact
            end
     item = post('/items', body)
-    return item if description.blank? || item['id'].blank?
+    # Item de catálogo não aceita descrição própria ("Description is not
+    # modifiable on catalog listing item", confirmado ao vivo 28/10/2026) —
+    # a ficha vem inteira do produto de catálogo.
+    return item if description.blank? || item['id'].blank? || catalog_product_id.present?
 
     post("/items/#{item['id']}/description", { plain_text: description })
     item
