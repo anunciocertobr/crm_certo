@@ -218,6 +218,7 @@ Rails.application.routes.draw do
         get 'meta_lead_notification_settings', to: 'meta_lead_notification_settings#index'
         put 'meta_lead_notification_settings/:form_id', to: 'meta_lead_notification_settings#upsert'
         delete 'meta_lead_notification_settings/:form_id', to: 'meta_lead_notification_settings#destroy'
+        get 'meta_lead_page_settings/known_dataset_ids', to: 'meta_lead_page_settings#known_dataset_ids'
         get 'meta_lead_page_settings/:page_id', to: 'meta_lead_page_settings#show'
         put 'meta_lead_page_settings/:page_id', to: 'meta_lead_page_settings#upsert'
         get 'whatsapp_groups', to: 'whatsapp_groups#index'

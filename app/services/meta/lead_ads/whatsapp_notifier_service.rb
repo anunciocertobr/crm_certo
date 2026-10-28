@@ -18,10 +18,15 @@
 #      'meta_leads_notify') quando essa união der vazia.
 #   3. Nenhum dos três configurado/habilitado -> não notifica (not_configured).
 #
-# O QUE vai na mensagem (seções) é escolhido por checkboxes no front: a
-# preferência do formulário (MetaLeadNotificationSetting#content_sections)
-# vence o padrão da conta (config 'meta_leads_notify' ->
-# META_LEADS_NOTIFY_CONTENT); sem nenhuma, envia todas (CONTENT_SECTIONS).
+# O QUE vai na mensagem (seções) é escolhido por checkboxes no front, POR
+# CANAL (campo content_sections dentro de cada item de channels/
+# effective_channels — pedido do usuário: "o que enviar deve ser definido
+# por canal", não um valor só pra todos os canais do mesmo envio). Canal
+# sem content_sections próprio cai pro padrão da conta (config
+# 'meta_leads_notify' -> META_LEADS_NOTIFY_CONTENT); sem nenhum, envia
+# todas (CONTENT_SECTIONS). A coluna `content_sections` no nível do
+# MetaLeadNotificationSetting/MetaLeadPageSetting (fora de cada canal)
+# ficou obsoleta — não é mais lida aqui.
 module Meta
   module LeadAds
     class WhatsappNotifierService
@@ -105,12 +110,17 @@ module Meta
 
         conversation = ConversationBuilder.new(params: conversation_params, contact_inbox: contact_inbox).perform
 
+        # Seções do que vai na mensagem são por CANAL (destination[:content_sections]),
+        # não mais uma escolha única pro envio inteiro — cada canal pode mandar um
+        # resumo diferente do mesmo lead. Sem escolha própria, cai pro padrão da conta.
+        sections = destination[:content_sections] || account_default_content_sections
+
         message = conversation.messages.new(
           inbox_id: conversation.inbox_id,
           message_type: :outgoing,
-          content: template
+          content: build_template(sections)
         )
-        image_url = creative_image_url
+        image_url = creative_image_url(sections)
         AgentBots::RemoteMediaAttacher.build_attachments(message, [{ url: image_url, file_type: 'image' }]) if image_url.present?
         message.save!
       end
@@ -155,14 +165,6 @@ module Meta
         @setting = MetaLeadNotificationSetting.find_by(form_id: @submission.form_id)
       end
 
-      # Seções a enviar: escolha do formulário → padrão da conta → nil (todas).
-      # Array explicito (inclusive []) significa "exatamente isso"; nil = todas.
-      def content_sections
-        return @content_sections if defined?(@content_sections)
-
-        @content_sections = setting&.effective_content_sections || account_default_content_sections
-      end
-
       def account_default_content_sections
         raw = GlobalConfigService.load('META_LEADS_NOTIFY_CONTENT', nil)
         return nil if raw.blank?
@@ -175,8 +177,8 @@ module Meta
 
       # Sem preferência salva (nil) libera tudo; com preferência, só o que foi
       # marcado. Desligar tudo e salvar é uma escolha válida (só o cabeçalho).
-      def section?(key)
-        content_sections.nil? || content_sections.include?(key.to_s)
+      def section?(key, sections)
+        sections.nil? || sections.include?(key.to_s)
       end
 
       def account_default_channels
@@ -195,11 +197,15 @@ module Meta
       end
 
       # Canal salvo (jsonb) pode ser destino número ou grupo — grupo tem
-      # prioridade se os dois vierem preenchidos por engano.
+      # prioridade se os dois vierem preenchidos por engano. content_sections
+      # é por canal (nil = manda todas as seções nesse canal, igual sempre
+      # foi o comportamento sem preferência salva).
       def channel_destination(c)
         return nil if c['inbox_id'].blank?
-        return { inbox_id: c['inbox_id'], group_jid: c['group_jid'], group_name: c['group_name'] } if c['group_jid'].present?
-        return { inbox_id: c['inbox_id'], whatsapp_number: c['whatsapp_number'] } if c['whatsapp_number'].present?
+
+        sections = c['content_sections'].is_a?(Array) ? c['content_sections'].map(&:to_s) : nil
+        return { inbox_id: c['inbox_id'], group_jid: c['group_jid'], group_name: c['group_name'], content_sections: sections } if c['group_jid'].present?
+        return { inbox_id: c['inbox_id'], whatsapp_number: c['whatsapp_number'], content_sections: sections } if c['whatsapp_number'].present?
 
         nil
       end
@@ -233,16 +239,16 @@ module Meta
       # Ordem pedida pelo usuário: Data, Formulário, Respostas, depois Campanha
       # e Direcionamento; o Criativo (texto principal/título/descrição) vai por
       # último.
-      def build_template
+      def build_template(sections)
         lines = []
         lines << '🔔 *Novo lead — Meta Ads*'
         lines << ''
         lines << "*Data:* #{formatted_date}"
         lines << "*Formulário:* #{form_label}"
 
-        lines.concat(answers_lines) if section?(:answers)
+        lines.concat(answers_lines) if section?(:answers, sections)
 
-        if section?(:entities)
+        if section?(:entities, sections)
           entidades = []
           entidades.concat(account_lines)
           push_entity_line(entidades, 'Campanha', @submission.campaign_name, @submission.campaign_id)
@@ -254,14 +260,14 @@ module Meta
           end
         end
 
-        alvo = targeting_lines
+        alvo = targeting_lines(sections)
         unless alvo.empty?
           lines << ''
           lines << '*Direcionamento do anúncio:*'
           lines.concat(alvo)
         end
 
-        criativo = creative_lines
+        criativo = creative_lines(sections)
         unless criativo.empty?
           lines << ''
           lines << '*Criativo:*'
@@ -295,14 +301,14 @@ module Meta
       # Texto principal/título/descrição do anúncio que gerou o lead — vem da
       # mesma leitura de criativo já usada pra anexar a imagem (nada aqui
       # pode quebrar a notificação: sem criativo, a mensagem vai sem bloco).
-      def creative_lines
+      def creative_lines(sections)
         detalhes = creative_details
         return [] if detalhes.blank?
 
         lines = []
-        lines << "• *Texto principal:* #{detalhes['texto_principal']}" if section?(:creative_text) && detalhes['texto_principal'].present?
-        lines << "• *Título:* #{detalhes['titulo']}" if section?(:creative_title) && detalhes['titulo'].present?
-        lines << "• *Descrição:* #{detalhes['descricao']}" if section?(:creative_description) && detalhes['descricao'].present?
+        lines << "• *Texto principal:* #{detalhes['texto_principal']}" if section?(:creative_text, sections) && detalhes['texto_principal'].present?
+        lines << "• *Título:* #{detalhes['titulo']}" if section?(:creative_title, sections) && detalhes['titulo'].present?
+        lines << "• *Descrição:* #{detalhes['descricao']}" if section?(:creative_description, sections) && detalhes['descricao'].present?
         lines
       end
 
@@ -338,31 +344,31 @@ module Meta
         end
       end
 
-      def targeting_lines
-        return [] unless targeting_sections_enabled?
+      def targeting_lines(sections)
+        return [] unless targeting_sections_enabled?(sections)
 
         alvo = targeting_summary
         return [] if alvo.blank?
 
         lines = []
-        lines << info_line('Orçamento', alvo[:orcamento]) if section?(:budget)
-        lines << info_line('Idade', idade_label(alvo)) if section?(:age_gender)
-        lines << info_line('Gênero', alvo[:generos]) if section?(:age_gender)
-        lines << info_line('Local', list_label(alvo[:localizacoes])) if section?(:location)
-        if section?(:audiences)
+        lines << info_line('Orçamento', alvo[:orcamento]) if section?(:budget, sections)
+        lines << info_line('Idade', idade_label(alvo)) if section?(:age_gender, sections)
+        lines << info_line('Gênero', alvo[:generos]) if section?(:age_gender, sections)
+        lines << info_line('Local', list_label(alvo[:localizacoes])) if section?(:location, sections)
+        if section?(:audiences, sections)
           lines << info_line('Público salvo', list_label(alvo[:publicos_salvos]))
           lines << info_line('Público personalizado', list_label(alvo[:publicos_personalizados]))
           lines << info_line('Público semelhante', list_label(alvo[:publicos_semelhantes]))
         end
-        lines << info_line('Direcionamento', list_label(alvo[:direcionamento])) if section?(:audience_detail)
-        lines << info_line('Plataformas', platform_label(alvo)) if section?(:platforms)
-        lines << info_line('Posicionamento', placements_label(alvo)) if section?(:placements)
-        lines << info_line('Dispositivo', list_label(alvo[:dispositivos])) if section?(:devices)
+        lines << info_line('Direcionamento', list_label(alvo[:direcionamento])) if section?(:audience_detail, sections)
+        lines << info_line('Plataformas', platform_label(alvo)) if section?(:platforms, sections)
+        lines << info_line('Posicionamento', placements_label(alvo)) if section?(:placements, sections)
+        lines << info_line('Dispositivo', list_label(alvo[:dispositivos])) if section?(:devices, sections)
         lines.compact
       end
 
-      def targeting_sections_enabled?
-        content_sections.nil? || TARGETING_SECTIONS.any? { |s| content_sections.include?(s) }
+      def targeting_sections_enabled?(sections)
+        sections.nil? || TARGETING_SECTIONS.any? { |s| sections.include?(s) }
       end
 
       # `publisher_platforms` ausente = posicionamentos automáticos (Advantage+),
@@ -460,8 +466,8 @@ module Meta
       # formulário, a imagem, data e os dados" pedido explicitamente. Sem
       # ad_id (lead veio de um teste/preview, por exemplo) simplesmente não
       # anexa imagem, não é erro.
-      def creative_image_url
-        return nil unless section?(:creative_image)
+      def creative_image_url(sections)
+        return nil unless section?(:creative_image, sections)
 
         detalhes = creative_details
         return nil if detalhes.blank?

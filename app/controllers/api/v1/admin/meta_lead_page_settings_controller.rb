@@ -10,6 +10,14 @@ class Api::V1::Admin::MetaLeadPageSettingsController < Api::V1::Admin::BaseContr
     render json: { success: true, data: setting ? serialize(setting) : empty_payload }
   end
 
+  # GET /meta_lead_page_settings/known_dataset_ids — todos os dataset_ids já
+  # configurados em alguma Página, pra pré-popular o Select de dataset no
+  # envio manual (tela "Ver Leads") em vez de digitar o ID na mão de novo.
+  def known_dataset_ids
+    ids = MetaLeadPageSetting.pluck(:dataset_ids).flatten.compact_blank.uniq.sort
+    render json: { success: true, data: ids }
+  end
+
   # PUT /meta_lead_page_settings/:page_id
   def upsert
     setting = MetaLeadPageSetting.find_or_initialize_by(page_id: params[:page_id])
@@ -34,7 +42,7 @@ class Api::V1::Admin::MetaLeadPageSettingsController < Api::V1::Admin::BaseContr
   end
 
   def meta_lead_page_setting_params
-    params.permit(channels: [:inbox_id, :whatsapp_number, :group_jid, :group_name], dataset_ids: [])
+    params.permit(channels: [:inbox_id, :whatsapp_number, :group_jid, :group_name, { content_sections: [] }], dataset_ids: [])
   end
 
   def empty_payload
