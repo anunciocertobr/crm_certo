@@ -14,15 +14,6 @@
 module Meta
   module LeadAds
     class ImportService
-      # Identifica telefone/e-mail/nome nas perguntas do formulário por
-      # nome do campo — formulários da Meta não têm um `type` estruturado
-      # pra isso, só o texto da pergunta que a corretora escolheu.
-      FIELD_NAME_PATTERNS = {
-        phone: /telefone|celular|whatsapp|phone/i,
-        email: /e-?mail/i,
-        name: /nome|name/i
-      }.freeze
-
       # Dedup do leadgen_id funciona pros dois modos (a Meta pode reenviar o
       # mesmo webhook) — pro modo 'pipeline' o índice único de leadgen_id em
       # MetaLeadSubmission já protege, mas pro 'notify_only' nada é persistido,
@@ -214,17 +205,7 @@ module Meta
       end
 
       def parse_fields(field_data)
-        parsed = {}
-        Array(field_data).each do |f|
-          field_name = f['name'].to_s
-          value = Array(f['values']).first
-          next if value.blank?
-
-          FIELD_NAME_PATTERNS.each do |key, pattern|
-            parsed[key] ||= value if field_name.match?(pattern)
-          end
-        end
-        parsed
+        Meta::LeadAds::FieldParser.parse(field_data)
       end
 
       def find_or_create_contact(parsed)

@@ -10,7 +10,7 @@
 # em mãos, já que ela busca os leads direto na Graph API, não deste banco
 # (ver Meta::AdsManagerService#leadgen_form_leads).
 class Api::V1::Admin::MetaLeadSubmissionsController < Api::V1::Admin::BaseController
-  before_action :set_meta_lead_submission, only: %i[show update]
+  before_action :set_meta_lead_submission, only: %i[update]
 
   def index
     statuses = params[:status].presence&.split(',') || %w[unmapped_form error]
@@ -18,8 +18,21 @@ class Api::V1::Admin::MetaLeadSubmissionsController < Api::V1::Admin::BaseContro
     render json: { success: true, data: submissions.map { |s| serialize(s) } }
   end
 
+  # Formulário "só notificar" (mode: notify_only) nunca persiste
+  # MetaLeadSubmission — sem isso, o painel "Ver Leads" ficava sem
+  # telefone/nome/ad_id pra pré-preencher o envio manual pro Meta (pedido
+  # do usuário). Sem registro no banco, busca o lead ao vivo na Graph API
+  # (mesmo endpoint que o ImportService usa na hora de importar) — exige
+  # `page_id` como query param, já que sem MetaLeadSubmission não tem como
+  # saber de qual Página o lead veio.
   def show
-    render json: { success: true, data: serialize(@submission, full: true) }
+    submission = MetaLeadSubmission.find_by(leadgen_id: params[:id])
+    if submission
+      render json: { success: true, data: serialize(submission, full: true) }
+      return
+    end
+
+    render_live_lookup
   end
 
   # Só os dois campos que fazem sentido editar manualmente: status (fila de
@@ -83,7 +96,57 @@ class Api::V1::Admin::MetaLeadSubmissionsController < Api::V1::Admin::BaseContro
     render json: { success: results.any? { |r| r[:success] }, data: results }
   end
 
+  # GET /meta_lead_submissions/pixels_for_ad?ad_id=... — pixels/datasets da
+  # conta de anúncios de onde o lead veio, pro seletor de dataset do envio
+  # manual (MetaCrmSendForm.tsx) vir preenchido sozinho em vez de uma lista
+  # fixa configurada manualmente antes.
+  def pixels_for_ad
+    result = Meta::PixelsLookupService.new.pixels_for_ad(params[:ad_id])
+    return error_response(ApiErrorCodes::EXTERNAL_SERVICE_ERROR, result.error, status: :bad_gateway) unless result.success
+
+    render json: { success: true, data: result.data }
+  end
+
   private
+
+  # leadgen_id sem MetaLeadSubmission no banco (notify_only, ou formulário
+  # mapeado depois do lead ter chegado) — busca ao vivo na Graph API só pra
+  # pré-preencher o envio manual (ad_id pros pixels, nome/telefone/e-mail
+  # parseados do field_data). `found: false` sinaliza pro front mostrar o
+  # mesmo aviso de sempre ("não passou pelo CRM"), só que agora com os
+  # campos já preenchidos em vez de em branco.
+  def render_live_lookup
+    leadgen_id = params[:id]
+    page_id = params[:page_id]
+    return render json: { success: true, data: empty_live_lookup(leadgen_id) } if page_id.blank?
+
+    result = Meta::AdsManagerService.new.lead_detail(page_id: page_id, leadgen_id: leadgen_id)
+    return render json: { success: true, data: empty_live_lookup(leadgen_id) } unless result.success
+
+    parsed = Meta::LeadAds::FieldParser.parse(result.data['field_data'])
+    render json: {
+      success: true,
+      data: {
+        found: false,
+        leadgen_id: leadgen_id,
+        ad_id: result.data['ad_id'],
+        adset_id: result.data['adset_id'],
+        campaign_id: result.data['campaign_id'],
+        field_data: result.data['field_data'],
+        contact_name: parsed[:name],
+        contact_phone: parsed[:phone],
+        contact_email: parsed[:email]
+      }
+    }
+  end
+
+  # Mesmas chaves sempre presentes (mesmo nil) nos dois caminhos de
+  # render_live_lookup — contrato fixo que o frontend espera
+  # (MetaLeadSubmissionLiveLookup), nunca um subconjunto.
+  def empty_live_lookup(leadgen_id)
+    { found: false, leadgen_id: leadgen_id, ad_id: nil, adset_id: nil, campaign_id: nil,
+      field_data: [], contact_name: nil, contact_phone: nil, contact_email: nil }
+  end
 
   def set_meta_lead_submission
     @submission = MetaLeadSubmission.find_by!(leadgen_id: params[:id])
@@ -113,6 +176,7 @@ class Api::V1::Admin::MetaLeadSubmissionsController < Api::V1::Admin::BaseContro
   def serialize(submission, full: false)
     item = submission.pipeline_item
     base = {
+      found: true,
       id: submission.id,
       leadgen_id: submission.leadgen_id,
       page_id: submission.page_id,
@@ -138,10 +202,16 @@ class Api::V1::Admin::MetaLeadSubmissionsController < Api::V1::Admin::BaseContro
     }
     return base unless full
 
+    # Fallback pro field_data bruto do formulário quando o Contact do CRM
+    # não tem o campo (nunca foi criado com telefone/nome certos, ou era um
+    # campo custom que o parser na hora do import não reconheceu) — pedido
+    # do usuário: "não está preenchendo telefone e nome sendo que já tem no
+    # formulário".
+    parsed_fields = Meta::LeadAds::FieldParser.parse(submission.field_data)
     base.merge(
-      contact_name: submission.contact&.name,
-      contact_phone: submission.contact&.phone_number,
-      contact_email: submission.contact&.email,
+      contact_name: submission.contact&.name.presence || parsed_fields[:name],
+      contact_phone: submission.contact&.phone_number.presence || parsed_fields[:phone],
+      contact_email: submission.contact&.email.presence || parsed_fields[:email],
       lead_quality: item&.lead_quality,
       lead_score: item&.lead_score,
       lead_objection: item&.lead_objection,

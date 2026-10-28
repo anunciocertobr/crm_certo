@@ -213,6 +213,11 @@ Rails.application.routes.draw do
         get 'real_estate/agents_kanban_stats', to: 'real_estate_agents#kanban_stats'
         get 'real_estate/agents/:agent_id/leads', to: 'real_estate_agents#leads'
         resources :meta_lead_forms, only: [:index, :create, :update, :destroy]
+        # pixels_for_ad precisa vir ANTES do `resources` — senão o `GET
+        # /meta_lead_submissions/:id` do `show` casa com "pixels_for_ad"
+        # como se fosse um leadgen_id, já que Rails casa rotas na ordem
+        # declarada.
+        get 'meta_lead_submissions/pixels_for_ad', to: 'meta_lead_submissions#pixels_for_ad'
         resources :meta_lead_submissions, only: %i[index show update]
         post 'meta_lead_submissions/send_to_meta_crm', to: 'meta_lead_submissions#send_to_meta_crm'
         get 'meta_lead_notification_settings', to: 'meta_lead_notification_settings#index'
