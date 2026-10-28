@@ -53,9 +53,46 @@ module ScheduledActions
         execute_webhook
       when 'create_task'
         execute_create_task
+      when 'send_report_pdf'
+        execute_send_report_pdf
       else
-        { success: false, error: "Unknown action type: #{scheduled_action.action_type}. Supported types: send_message, execute_webhook, create_task" }
+        { success: false, error: "Unknown action type: #{scheduled_action.action_type}. Supported types: send_message, execute_webhook, create_task, send_report_pdf" }
       end
+    end
+
+    # Agendamento recorrente do PDF do relatório Meta Ads (botão "Programar",
+    # ver app/services/reports/*). O payload guarda só offsets de dias
+    # (payload['period']) — Reports::RelativePeriod resolve pra datas de
+    # verdade AQUI, a cada execução, nunca uma vez só (senão toda recorrência
+    # reenviaria o mesmo período do primeiro disparo).
+    def execute_send_report_pdf
+      payload = scheduled_action.payload
+      period_cfg = payload['period'] || {}
+      period = Reports::RelativePeriod.resolve(
+        start_days_ago: period_cfg['start_days_ago'],
+        end_days_ago: period_cfg['end_days_ago']
+      )
+
+      pdf_result = Reports::MetaAdsPdfService.new(
+        ad_account_id: payload['ad_account_id'],
+        date_start: period[:start].iso8601,
+        date_stop: period[:end].iso8601,
+        metrics_selection: payload['metrics_selection'] || {}
+      ).call
+      return { success: false, error: pdf_result.error } unless pdf_result.success
+
+      destination = payload['destination'] || {}
+      send_result = Reports::ReportPdfSenderService.call(
+        pdf_bytes: pdf_result.data,
+        filename: "relatorio-meta-ads_#{period[:start]}_a_#{period[:end]}.pdf",
+        inbox_id: destination['inbox_id'],
+        whatsapp_number: destination['whatsapp_number'],
+        group_jid: destination['group_jid'],
+        group_name: destination['group_name'],
+        created_by: scheduled_action.created_by
+      )
+
+      send_result.success ? { success: true, data: { period: period } } : { success: false, error: send_result.error }
     end
 
     # Unified send_message handler that supports: whatsapp, sms, email, telegram

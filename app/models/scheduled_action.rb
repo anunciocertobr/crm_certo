@@ -64,6 +64,7 @@ class ScheduledAction < ApplicationRecord
     add_deal_note
     send_whatsapp
     send_sms
+    send_report_pdf
   ].freeze
 
   STATUSES = %w[
@@ -79,6 +80,8 @@ class ScheduledAction < ApplicationRecord
     daily
     weekly
     monthly
+    biweekly
+    custom
   ].freeze
 
   # Validations
@@ -224,7 +227,11 @@ class ScheduledAction < ApplicationRecord
     errors.add(:scheduled_for, 'cannot be in the past')
   end
 
+  # send_report_pdf não tem alvo no CRM — o "alvo" dele é o destino de
+  # WhatsApp em payload['destination'] (inbox + número ou grupo), validado
+  # na hora de montar o envio, não aqui.
   def at_least_one_target_present
+    return if action_type == 'send_report_pdf'
     return if deal_id.present? || contact_id.present? || conversation_id.present?
 
     errors.add(:base, 'must have at least one target (deal, contact, or conversation)')
@@ -238,6 +245,10 @@ class ScheduledAction < ApplicationRecord
       scheduled_for + 1.week
     when 'monthly'
       scheduled_for + 1.month
+    when 'biweekly'
+      scheduled_for + 15.days
+    when 'custom'
+      scheduled_for + (recurrence_config&.dig('interval_days').presence || 1).to_i.days
     else
       nil
     end

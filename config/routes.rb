@@ -250,6 +250,7 @@ Rails.application.routes.draw do
         get 'meta_ads/campaigns', to: 'meta_ads#campaigns'
         get 'meta_ads/accounts', to: 'meta_ads#accounts'
         get 'meta_ads/business_managers', to: 'meta_ads#business_managers'
+        post 'meta_ads/send_pdf', to: 'meta_ads_pdf#send_pdf'
         get 'google_ads/insights', to: 'google_ads#insights'
         get 'analytics/properties', to: 'analytics#properties'
         get 'analytics/overview', to: 'analytics#overview'
