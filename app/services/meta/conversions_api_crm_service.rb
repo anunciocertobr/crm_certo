@@ -65,6 +65,23 @@ module Meta
       post("/#{dataset_id}/events", body)
     end
 
+    # Campos de user_data que a Meta exige em texto puro hasheado (SHA256) —
+    # "Dados do Cliente" no front. db = data de nascimento (só dígitos,
+    # YYYYMMDD); os demais são texto normalizado (minúsculo/sem espaço nas
+    # bordas) antes do hash. Ver doc oficial: Customer Information Parameters.
+    HASHED_USER_FIELDS = %i[em ph fn ln ge db ct st zp country external_id].freeze
+
+    # Campos de user_data que vão em texto puro (nunca hasheados) — ids
+    # técnicos/cookies que a própria Meta usa pra casar com o clique/sessão.
+    PLAIN_USER_FIELDS = %i[lead_id client_ip_address client_user_agent fbc fbp].freeze
+
+    # Campos de custom_data ("Dados do Produto/Pedido") — texto livre, sem
+    # hash. content_ids/contents já chegam como array do controller.
+    CUSTOM_DATA_FIELDS = %i[
+      currency value content_name content_category content_ids content_type
+      contents order_id num_items search_string status delivery_category predicted_ltv
+    ].freeze
+
     # Envio MANUAL (botão "Enviar pro Meta" na tela "Ver Leads") — paralelo
     # ao send_event acima (que é do fluxo AUTOMÁTICO disparado por mudança
     # de fase/qualidade do Kanban, intocado). Diferenças de propósito:
@@ -73,11 +90,12 @@ module Meta
     #     valor digitado na hora), não lido de GlobalConfig.
     #   - não checa META_CRM_ENABLED/META_CRM_DATASET_ID (configs do fluxo
     #     automático) — só partner_agent + token, que são compartilhados.
-    #   - aceita email/phone pra preencher em/ph (hash SHA256) no user_data,
-    #     que melhora o match da Meta — o fluxo automático nunca tinha isso.
+    #   - aceita o schema completo de user_data/custom_data da Conversions
+    #     API (não só e-mail/telefone) — pedido do usuário, baseado no
+    #     Payload Helper oficial da Meta.
     # Nunca persiste nada (nem o payload, nem o resultado) no nosso banco —
     # pedido explícito do usuário.
-    def send_manual_event(event_name:, leadgen_id:, dataset_id:, email: nil, phone: nil)
+    def send_manual_event(event_name:, dataset_id:, action_source: 'system_generated', user_data: {}, custom_data: {})
       partner_agent = GlobalConfigService.load('META_CRM_PARTNER_AGENT', nil)
       if partner_agent.blank?
         return Result.new(success: false, error: 'Falta configurar o partner_agent (combinado com o representante da Meta).')
@@ -86,18 +104,19 @@ module Meta
         return Result.new(success: false, error: 'Nenhuma Página do Facebook conectada com token válido.')
       end
 
-      user_data = { lead_id: leadgen_id }
-      user_data[:em] = [hash_sha256(email)] if email.present?
-      user_data[:ph] = [hash_sha256(normalize_phone_digits(phone))] if phone.present?
+      built_user_data = build_user_data(user_data)
+      if built_user_data.empty?
+        return Result.new(success: false, error: 'Informe ao menos um dado do cliente (e-mail, telefone, lead_id...).')
+      end
 
       body = {
         data: [
           {
             event_name: event_name,
             event_time: Time.current.to_i,
-            action_source: 'system_generated',
-            user_data: user_data,
-            custom_data: { lead_event_source: 'Anuncio Certo CRM', event_source: 'crm' },
+            action_source: action_source,
+            user_data: built_user_data,
+            custom_data: { lead_event_source: 'Anuncio Certo CRM', event_source: 'crm' }.merge(build_custom_data(custom_data)),
             partner_agent: partner_agent
           }
         ]
@@ -108,6 +127,30 @@ module Meta
 
     private
 
+    def build_user_data(raw)
+      data = {}
+      HASHED_USER_FIELDS.each do |key|
+        value = raw[key] || raw[key.to_s]
+        next if value.blank?
+
+        value = normalize_phone_digits(value) if key == :ph
+        value = value.to_s.gsub(/\D/, '') if key == :db # YYYYMMDD só dígitos
+        data[key] = [hash_sha256(value)]
+      end
+      PLAIN_USER_FIELDS.each do |key|
+        value = raw[key] || raw[key.to_s]
+        data[key] = value if value.present?
+      end
+      data
+    end
+
+    def build_custom_data(raw)
+      CUSTOM_DATA_FIELDS.each_with_object({}) do |key, data|
+        value = raw[key] || raw[key.to_s]
+        data[key] = value if value.present? || value == 0
+      end
+    end
+
     # Normalização pro hash de telefone — minúsculo/sem espaço não se aplica
     # a número, só precisa ficar só com dígitos + DDI (mesma convenção de
     # Meta::LeadAds::ImportService#normalize_br_phone: assume Brasil quando
@@ -117,8 +160,9 @@ module Meta
       digits.start_with?('55') ? digits : "55#{digits}"
     end
 
-    # Hash exigido pela Meta pra em/ph em texto puro: SHA256 em hexadecimal,
-    # minúsculo e sem espaço nas bordas (doc da Conversions API).
+    # Hash exigido pela Meta pra campos de user_data em texto puro: SHA256
+    # em hexadecimal, minúsculo e sem espaço nas bordas (doc da Conversions
+    # API — vale pra em/ph/fn/ln/ge/db/ct/st/zp/country/external_id).
     def hash_sha256(value)
       Digest::SHA256.hexdigest(value.to_s.strip.downcase)
     end

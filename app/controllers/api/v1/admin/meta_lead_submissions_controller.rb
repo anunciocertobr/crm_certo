@@ -53,20 +53,29 @@ class Api::V1::Admin::MetaLeadSubmissionsController < Api::V1::Admin::BaseContro
   # persistem nada, também conseguem usar isso) e NUNCA grava nada: nem o
   # payload mandado, nem o resultado. Pode mandar pra mais de um dataset de
   # uma vez (fan-out), cada um falha isoladamente.
+  #
+  # user_data/custom_data são o schema completo da Conversions API (ver
+  # Meta::ConversionsApiCrmService::HASHED_USER_FIELDS/PLAIN_USER_FIELDS/
+  # CUSTOM_DATA_FIELDS) — o front manda só o que o usuário preencheu, campo
+  # vazio não entra no payload.
   def send_to_meta_crm
     leadgen_id = params[:leadgen_id]
     dataset_ids = Array(params[:dataset_ids]).map(&:to_s).reject(&:blank?)
     return error_response(ApiErrorCodes::VALIDATION_ERROR, 'Informe o leadgen_id.', status: :unprocessable_entity) if leadgen_id.blank?
     return error_response(ApiErrorCodes::VALIDATION_ERROR, 'Informe ao menos um dataset.', status: :unprocessable_entity) if dataset_ids.empty?
 
+    user_data = send_to_meta_crm_user_data_params.to_h
+    user_data[:lead_id] = leadgen_id if user_data[:lead_id].blank?
+    custom_data = send_to_meta_crm_custom_data_params.to_h
+
     service = Meta::ConversionsApiCrmService.new
     results = dataset_ids.map do |dataset_id|
       result = service.send_manual_event(
         event_name: params[:event_name].presence || 'Lead',
-        leadgen_id: leadgen_id,
         dataset_id: dataset_id,
-        email: params[:email],
-        phone: params[:phone]
+        action_source: params[:action_source].presence || 'system_generated',
+        user_data: user_data,
+        custom_data: custom_data
       )
       { dataset_id: dataset_id, success: result.success, error: result.error, meta_response: result.data }
     end
@@ -84,6 +93,21 @@ class Api::V1::Admin::MetaLeadSubmissionsController < Api::V1::Admin::BaseContro
 
   def lead_params
     params.permit(:status, :pipeline_stage_id)
+  end
+
+  def send_to_meta_crm_user_data_params
+    params.fetch(:user_data, {}).permit(
+      :em, :ph, :fn, :ln, :ge, :db, :ct, :st, :zp, :country, :external_id,
+      :lead_id, :client_ip_address, :client_user_agent, :fbc, :fbp
+    )
+  end
+
+  def send_to_meta_crm_custom_data_params
+    params.fetch(:custom_data, {}).permit(
+      :currency, :value, :content_name, :content_category, :content_type,
+      :order_id, :num_items, :search_string, :status, :delivery_category, :predicted_ltv,
+      content_ids: []
+    )
   end
 
   def serialize(submission, full: false)
