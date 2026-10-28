@@ -2,7 +2,14 @@
 # `ml_*` já existentes no model (ver migration 20260814140000) — `ml_category`
 # é obrigatório (sem categoria real do ML o #publish_item da API recusa).
 #
-# NUNCA TESTADO CONTRA A API REAL — ver nota em MercadoLivre::Client.
+# Testado contra a API real em 28/10/2026 (categoria MLB11172/Consoles,
+# conta CA20250712202133) — a tentativa SEM `attributes` foi rejeitada
+# (BRAND/MODEL/VOLTAGE obrigatórios nessa categoria, erro 400
+# "missing.attribute"); `build_attributes` abaixo foi adicionado por causa
+# disso. Toda categoria do ML pede um conjunto diferente de atributos
+# obrigatórios — descobrir via `GET /categories/:id/attributes` (campo
+# `tags.required`) antes de publicar numa categoria nova; não tem como
+# saber sem checar, a API só recusa.
 class MercadoLivre::PublishProductService
   Result = Struct.new(:success, :error, keyword_init: true)
 
@@ -35,7 +42,8 @@ class MercadoLivre::PublishProductService
       condition: product.ml_condition.presence || 'new',
       listing_type_id: product.ml_listing_type.presence || 'gold_special',
       description: product.description,
-      picture_urls: product.media.to_a.filter_map { |m| m['url'] }
+      picture_urls: product.media.to_a.filter_map { |m| m['url'] },
+      attributes: build_attributes(product)
     )
     product.update!(ml_item_id: item['id'], ml_published_at: Time.current, ml_sync_error: nil)
     Result.new(success: true)
@@ -45,5 +53,17 @@ class MercadoLivre::PublishProductService
     @client.update_item(product.ml_item_id, price: product.default_price, quantity: product.stock_quantity)
     product.update!(ml_published_at: Time.current, ml_sync_error: nil)
     Result.new(success: true)
+  end
+
+  # BRAND/MODEL vêm das colunas próprias do produto (brand/model) quando
+  # preenchidas; `product.ml_attributes` (jsonb livre, ex.: {"VOLTAGE" =>
+  # "Bivolt"}) completa ou sobrescreve — cada categoria da ML pede um
+  # conjunto diferente, não dá pra fixar uma lista só.
+  def build_attributes(product)
+    attrs = {}
+    attrs['BRAND'] = product.brand if product.brand.present?
+    attrs['MODEL'] = product.model if product.model.present?
+    attrs.merge!(product.ml_attributes) if product.ml_attributes.present?
+    attrs.map { |id, value_name| { id: id, value_name: value_name.to_s } }
   end
 end

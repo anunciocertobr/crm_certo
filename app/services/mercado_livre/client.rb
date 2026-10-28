@@ -56,7 +56,7 @@ class MercadoLivre::Client
   # `model` como atributo tipado, não string livre) provavelmente vão
   # precisar de ajuste assim que testado contra uma categoria real.
   def publish_item(category_id:, title:, price:, quantity:, condition: 'new', listing_type_id: 'gold_special',
-                    description: nil, picture_urls: [], buying_mode: 'buy_it_now')
+                    description: nil, picture_urls: [], buying_mode: 'buy_it_now', attributes: [])
     body = {
       title: title,
       category_id: category_id,
@@ -66,7 +66,8 @@ class MercadoLivre::Client
       buying_mode: buying_mode,
       condition: condition,
       listing_type_id: listing_type_id,
-      pictures: picture_urls.map { |url| { source: url } }
+      pictures: picture_urls.map { |url| { source: url } },
+      attributes: attributes.presence
     }.compact
     item = post('/items', body)
     return item if description.blank? || item['id'].blank?
