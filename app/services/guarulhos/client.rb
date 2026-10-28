@@ -216,11 +216,21 @@ module Guarulhos
     # `/service-atividade/api/atividade/v2/lista-atividades/3518800`.
     # Não dá para derivar do item (um item tem várias atividades), então esta
     # tabela guarda a atividade padrão de cada item usado pela empresa.
+    # 1706 trocado de 731900201 ("Promoção de vendas/publicidade") pra
+    # 731900300 em 28/10/2026 — pedido do usuário, bate exatamente com a
+    # atividade econômica PRINCIPAL registrada no CNPJ da empresa (73.19-
+    # 0-03 "Marketing direto", ver Cartão CNPJ) para notas de tráfego
+    # pago/marketing digital. Não consegui confirmar contra a lista ao
+    # vivo da prefeitura (endpoint `/service-atividade/.../lista-
+    # atividades/3518800` do comentário acima respondeu 404 em todas as
+    # variações de host testadas — path desatualizado ou atrás de algo
+    # que não é HTTP simples) — confirmar com o contador na primeira
+    # emissão real com este código.
     CODIGOS_TRIBUTACAO_MUNICIPIO = {
       '1008' => '731220001', # Agenciamento de espaços publicitários
       '1009' => '731140002', # Representação de veículos de comunicação
       '1701' => '731900400', # Consultoria em publicidade
-      '1706' => '731900201'  # Promoção de vendas / publicidade
+      '1706' => '731900300'  # Marketing direto / tráfego pago (CNAE principal da empresa)
     }.freeze
 
     def codigo_tributacao_municipio(invoice)
