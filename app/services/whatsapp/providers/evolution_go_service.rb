@@ -168,7 +168,10 @@ class Whatsapp::Providers::EvolutionGoService < Whatsapp::Providers::BaseService
     return JSON.parse(cached) if cached.present?
 
     url = "#{api_base_path}/group/fetchAllGroups/#{instance_name}?getParticipants=false"
-    response = HTTParty.get(url, headers: api_headers, timeout: 10)
+    # 30s — mesmo ajuste de Whatsapp::Providers::EvolutionService#fetch_all_groups
+    # (confirmado ao vivo que esse endpoint demora ~17s, 10s cortava cedo
+    # demais e mascarava como "sem grupos").
+    response = HTTParty.get(url, headers: api_headers, timeout: 30)
     return [] unless response.success?
 
     parsed = response.parsed_response
