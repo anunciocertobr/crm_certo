@@ -271,6 +271,8 @@ Rails.application.routes.draw do
         post 'google_contacts', to: 'google_contacts#handle'
         post 'criativos', to: 'criativos#handle'
         resources :ad_leads, only: [:index, :update]
+        get 'helena_wts/contacts', to: 'helena_wts#contacts'
+        get 'helena_wts/all_contacts', to: 'helena_wts#all_contacts'
       end
 
       # Automação de cobrança (PIX/boleto) de saldo pré-pago do Meta Ads
