@@ -251,25 +251,20 @@ module Guarulhos
     # Valores default cobrem a operação comum desta empresa (venda de
     # serviço B2B nacional, sem comércio exterior — por isso <comExt> fica
     # de fora): finNFSe=0 (regular), indFinal=0 (não é consumo pessoal),
-    # cIndOp=000001 e CST=001/cClassTrib=010101 (tributação integral,
-    # mesmos valores do exemplo oficial do manual).
-    IBS_CBS_CST_PADRAO = '001'
-    IBS_CBS_CLASSIFICACAO_PADRAO = '010101'
+    # cIndOp=000001 e CST=000/cClassTrib=000001 ("Tributação integral" /
+    # "Situações tributadas integralmente pelo IBS e CBS", tabela oficial
+    # de Classificação Tributária do Portal Nacional da Reforma
+    # Tributária). Os 3 primeiros dígitos do cClassTrib têm que bater com
+    # o CST — por isso NÃO é CST=001/cClassTrib=010101 (valores usados até
+    # 29/10/2026, que vieram de um exemplo do manual de RETORNO de
+    # Guarulhos mas CST=001 nem existe na tabela real: ela começa em 000,
+    # segue 010, 011, 200... — e 010101 tem prefixo 010, inconsistente com
+    # CST=001). Essa inconsistência nos dados, não falta de suporte do
+    # schema v2_04, foi a causa real de 3 emissões reais rejeitadas com
+    # [E160] Arquivo em desacordo com o XML Schema.
+    IBS_CBS_CST_PADRAO = '000'
+    IBS_CBS_CLASSIFICACAO_PADRAO = '000001'
 
-    # Desabilitado em 29/10/2026: três emissões reais seguidas (RPS 2-4)
-    # foram rejeitadas com [E160] Arquivo em desacordo com o XML Schema
-    # assim que esse bloco entrou no corpo do lote — mesmo depois de já
-    # terem sido descartados como causa o CodigoNbs (RPS 2-3) e o formato
-    # do ItemListaServico (RPS 3-4, faltava o ponto: "17.06", não "1706").
-    # Isolando as duas únicas mudanças nunca testadas contra o envio real
-    # (CodigoNbs e este bloco IBS/CBS), o IBSCBS é o único candidato que
-    # sobrou sem teste: o XML declara schema v2_04
-    # (enviar-lote-rps-envio-v2_04.xsd — ver cabeçalho do arquivo), que
-    # antecede a Reforma Tributária (LC 214/2025); o manual técnico que
-    # descreve esse bloco pode se referir a uma versão de schema que
-    # Guarulhos/GissOnline ainda não publicou para esse endpoint. Mantido
-    # aqui, só não chamado, até confirmar com a prefeitura/contador se e
-    # quando reativar.
     def ibs_cbs_node(invoice)
       rgrp(tipos('IBSCBS'), [
         elem(tipos('finNFSe'), '0'),
@@ -309,8 +304,8 @@ module Guarulhos
           # indTotTrib=0 é o único valor aceito para "não informar".
           rgrp(tipos('trib'), [
             rgrp(tipos('totTrib'), [elem(tipos('indTotTrib'), '0')])
-          ])
-          # ibs_cbs_node(invoice) desabilitado — ver comentário na definição do método acima.
+          ]),
+          ibs_cbs_node(invoice)
         ]),
         elem(tipos('IssRetido'), '2'),
         elem(tipos('ItemListaServico'), invoice.codigo_servico_municipal),
