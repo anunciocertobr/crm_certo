@@ -248,23 +248,30 @@ module Guarulhos
     # total da nota (fase de testes/homologação) — só a classificação já
     # deixa a nota pronta pro schema atual.
     #
-    # Valores default cobrem a operação comum desta empresa (venda de
-    # serviço B2B nacional, sem comércio exterior — por isso <comExt> fica
-    # de fora): finNFSe=0 (regular), indFinal=0 (não é consumo pessoal),
-    # cIndOp=000001 e CST=000/cClassTrib=000001 ("Tributação integral" /
-    # "Situações tributadas integralmente pelo IBS e CBS", tabela oficial
-    # de Classificação Tributária do Portal Nacional da Reforma
-    # Tributária). Os 3 primeiros dígitos do cClassTrib têm que bater com
-    # o CST — por isso NÃO é CST=001/cClassTrib=010101 (valores usados até
-    # 29/10/2026, que vieram de um exemplo do manual de RETORNO de
-    # Guarulhos mas CST=001 nem existe na tabela real: ela começa em 000,
-    # segue 010, 011, 200... — e 010101 tem prefixo 010, inconsistente com
-    # CST=001). Essa inconsistência nos dados, não falta de suporte do
-    # schema v2_04, foi a causa real de 3 emissões reais rejeitadas com
-    # [E160] Arquivo em desacordo com o XML Schema.
+    # Valores que cobririam a operação comum desta empresa (venda de serviço
+    # B2B nacional, sem comércio exterior): finNFSe=0 (regular), indFinal=0
+    # (não é consumo pessoal), cIndOp=000001 e CST=000/cClassTrib=000001
+    # ("Tributação integral" / "Situações tributadas integralmente pelo IBS
+    # e CBS", tabela oficial de Classificação Tributária do Portal Nacional
+    # da Reforma Tributária — os 3 primeiros dígitos do cClassTrib batem com
+    # o CST, diferente do CST=001/cClassTrib=010101 usado antes, que nem
+    # existe na tabela real).
     IBS_CBS_CST_PADRAO = '000'
     IBS_CBS_CLASSIFICACAO_PADRAO = '000001'
 
+    # Desabilitado de novo em 29/10/2026: com CST=001/cClassTrib=010101
+    # (inconsistente com a tabela oficial) deu [E160] em 3 emissões reais
+    # (RPS 2-4). Corrigido pra CST=000/cClassTrib=000001 (consistente,
+    # confere com a tabela nacional) e tentado de novo — RPS 7 (17:12:42
+    # UTC, já rodando essa correção, deploy anterior terminou antes das
+    # 15:12 UTC) deu o MESMO erro [E160]. Ou seja, não era problema de
+    # valor de domínio — o validador real de Guarulhos/GissOnline
+    # provavelmente não reconhece esse elemento de jeito nenhum, mesmo
+    # tecnicamente correto segundo o manual nacional (hipótese original,
+    # antes de ter sido descartada por engano ao achar o exemplo do manual
+    # de RETORNO batendo com o formato enviado). Método mantido no código,
+    # só não chamado, até confirmar com a prefeitura/contador se e quando
+    # o schema real passa a aceitar.
     def ibs_cbs_node(invoice)
       rgrp(tipos('IBSCBS'), [
         elem(tipos('finNFSe'), '0'),
@@ -304,8 +311,8 @@ module Guarulhos
           # indTotTrib=0 é o único valor aceito para "não informar".
           rgrp(tipos('trib'), [
             rgrp(tipos('totTrib'), [elem(tipos('indTotTrib'), '0')])
-          ]),
-          ibs_cbs_node(invoice)
+          ])
+          # ibs_cbs_node(invoice) desabilitado — ver comentário na definição do método acima.
         ]),
         elem(tipos('IssRetido'), '2'),
         elem(tipos('ItemListaServico'), invoice.codigo_servico_municipal),
