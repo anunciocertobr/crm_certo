@@ -256,6 +256,20 @@ module Guarulhos
     IBS_CBS_CST_PADRAO = '001'
     IBS_CBS_CLASSIFICACAO_PADRAO = '010101'
 
+    # Desabilitado em 29/10/2026: três emissões reais seguidas (RPS 2-4)
+    # foram rejeitadas com [E160] Arquivo em desacordo com o XML Schema
+    # assim que esse bloco entrou no corpo do lote — mesmo depois de já
+    # terem sido descartados como causa o CodigoNbs (RPS 2-3) e o formato
+    # do ItemListaServico (RPS 3-4, faltava o ponto: "17.06", não "1706").
+    # Isolando as duas únicas mudanças nunca testadas contra o envio real
+    # (CodigoNbs e este bloco IBS/CBS), o IBSCBS é o único candidato que
+    # sobrou sem teste: o XML declara schema v2_04
+    # (enviar-lote-rps-envio-v2_04.xsd — ver cabeçalho do arquivo), que
+    # antecede a Reforma Tributária (LC 214/2025); o manual técnico que
+    # descreve esse bloco pode se referir a uma versão de schema que
+    # Guarulhos/GissOnline ainda não publicou para esse endpoint. Mantido
+    # aqui, só não chamado, até confirmar com a prefeitura/contador se e
+    # quando reativar.
     def ibs_cbs_node(invoice)
       rgrp(tipos('IBSCBS'), [
         elem(tipos('finNFSe'), '0'),
@@ -295,8 +309,8 @@ module Guarulhos
           # indTotTrib=0 é o único valor aceito para "não informar".
           rgrp(tipos('trib'), [
             rgrp(tipos('totTrib'), [elem(tipos('indTotTrib'), '0')])
-          ]),
-          ibs_cbs_node(invoice)
+          ])
+          # ibs_cbs_node(invoice) desabilitado — ver comentário na definição do método acima.
         ]),
         elem(tipos('IssRetido'), '2'),
         elem(tipos('ItemListaServico'), invoice.codigo_servico_municipal),
