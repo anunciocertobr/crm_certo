@@ -1,10 +1,12 @@
-# Manda um PDF (bytes já prontos — vindo do navegador no envio avulso, ou
-# gerado no servidor pelo agendamento recorrente) por WhatsApp pra um
-# destino (inbox + número OU inbox + grupo). Reaproveita o mesmo padrão de
+# Manda um PDF qualquer (bytes já prontos — relatório gerado no navegador,
+# NFS-e já emitida, etc.) por WhatsApp pra um destino (inbox + número OU
+# inbox + grupo). Reaproveita o mesmo padrão de
 # Meta::LeadAds::WhatsappNotifierService#send_to (ContactInboxWithContact
 # Builder + ConversationBuilder) e o pipeline de envio já existente
 # (Message#send_reply -> SendReplyJob -> provider dispatch) — nenhum
-# código novo de envio.
+# código novo de envio. Apesar do namespace `Reports::`, não é mais
+# exclusivo de relatórios (ver `contact_name:`, que cada chamador passa
+# pra descrever o tipo de arquivo no nome do contato criado).
 #
 # Restrição importante (mesma de AgentBots::RemoteMediaAttacher): o anexo
 # tem que ser montado no Message ANTES do save — commitar sem anexo
@@ -17,7 +19,8 @@ module Reports
       new(**kwargs).call
     end
 
-    def initialize(pdf_bytes:, filename:, inbox_id:, whatsapp_number: nil, group_jid: nil, group_name: nil, created_by: nil)
+    def initialize(pdf_bytes:, filename:, inbox_id:, whatsapp_number: nil, group_jid: nil, group_name: nil,
+                   created_by: nil, contact_name: 'Relatório Meta Ads')
       @pdf_bytes = pdf_bytes
       @filename = filename
       @inbox_id = inbox_id
@@ -25,6 +28,7 @@ module Reports
       @group_jid = group_jid
       @group_name = group_name
       @created_by = created_by
+      @contact_name = contact_name
     end
 
     def call
@@ -62,7 +66,7 @@ module Reports
       elsif @whatsapp_number.present?
         contact_inbox = ContactInboxWithContactBuilder.new(
           inbox: inbox,
-          contact_attributes: { phone_number: normalize_phone(@whatsapp_number), name: 'Relatório Meta Ads' }
+          contact_attributes: { phone_number: normalize_phone(@whatsapp_number), name: @contact_name }
         ).perform
         [contact_inbox, ActionController::Parameters.new({}).permit!]
       else

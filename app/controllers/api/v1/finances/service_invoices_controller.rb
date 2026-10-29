@@ -1,5 +1,5 @@
 class Api::V1::Finances::ServiceInvoicesController < Api::V1::BaseController
-  before_action :set_service_invoice, only: %i[show cancel pdf]
+  before_action :set_service_invoice, only: %i[show cancel pdf send_pdf]
 
   def index
     invoices = ServiceInvoice.includes(:fiscal_establishment).order(created_at: :desc)
@@ -23,6 +23,38 @@ class Api::V1::Finances::ServiceInvoicesController < Api::V1::BaseController
     pdf_data = ServiceInvoices::DanfsePdfService.call(@invoice)
     send_data pdf_data, filename: "nfse-#{@invoice.numero_nfse || @invoice.numero_rps}.pdf",
                          type: 'application/pdf', disposition: 'inline'
+  rescue ServiceInvoices::DanfsePdfService::Error => e
+    error_response(ApiErrorCodes::BUSINESS_RULE_VIOLATION, e.message, status: :unprocessable_entity)
+  end
+
+  # POST /finances/service_invoices/:id/send_pdf — manda o mesmo DANFSe de
+  # `pdf` direto por WhatsApp (inbox + número OU grupo), reaproveitando
+  # Reports::ReportPdfSenderService (mesmo serviço do botão "Enviar" dos
+  # relatórios PDF — ver app/services/reports/report_pdf_sender_service.rb).
+  def send_pdf
+    unless @invoice.authorized?
+      return error_response(ApiErrorCodes::BUSINESS_RULE_VIOLATION,
+                             'NFS-e ainda não autorizada — sem dados da prefeitura pra gerar o PDF',
+                             status: :unprocessable_entity)
+    end
+
+    pdf_data = ServiceInvoices::DanfsePdfService.call(@invoice)
+    result = Reports::ReportPdfSenderService.call(
+      pdf_bytes: pdf_data,
+      filename: "nfse-#{@invoice.numero_nfse || @invoice.numero_rps}.pdf",
+      inbox_id: params.require(:inbox_id),
+      whatsapp_number: params[:whatsapp_number],
+      group_jid: params[:group_jid],
+      group_name: params[:group_name],
+      created_by: current_user&.id,
+      contact_name: 'NFS-e'
+    )
+
+    if result.success
+      success_response(data: { sent: true })
+    else
+      error_response(ApiErrorCodes::EXTERNAL_SERVICE_ERROR, result.error, status: :unprocessable_entity)
+    end
   rescue ServiceInvoices::DanfsePdfService::Error => e
     error_response(ApiErrorCodes::BUSINESS_RULE_VIOLATION, e.message, status: :unprocessable_entity)
   end

@@ -57,6 +57,7 @@ Rails.application.routes.draw do
           member do
             post :cancel
             get :pdf
+            post :send_pdf
           end
         end
         # NF-e 55 / NFC-e 65 — independente da NFS-e acima (ver
