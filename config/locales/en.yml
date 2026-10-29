@@ -285,6 +285,10 @@ en:
       name: 'LeadSquared'
       short_description: 'Sync your contacts and conversations with LeadSquared CRM.'
       description: 'Sync your contacts and conversations with LeadSquared CRM. This integration automatically creates leads in LeadSquared when new contacts are added, and logs conversation activity to provide your sales team with complete context.'
+    helena:
+      name: 'Helena (WTS)'
+      short_description: 'Imports contacts with campaign origin data (Meta/Instagram).'
+      description: 'Connect the WTS/Helena API to import contacts with campaign origin tracking data (clid, UTM, platform), shown in Marketing > Rastreamentos.'
     groq:
       name: 'Groq'
       short_description: 'Ultra-fast AI inference.'

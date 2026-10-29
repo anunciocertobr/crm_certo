@@ -97,7 +97,7 @@ class Integrations::App
       GlobalConfigService.load('MERCADO_LIVRE_CLIENT_ID', nil).present?
     when 'shopee'
       GlobalConfigService.load('SHOPEE_PARTNER_ID', nil).present?
-    when 'leadsquared', 'bms'
+    when 'leadsquared', 'bms', 'helena'
       true
     when 'webhook', 'dashboard_apps', 'openai', 'gemini', 'google_workspace', 'groq', 'google_ads', 'elevenlabs', 'huggingface'
       true

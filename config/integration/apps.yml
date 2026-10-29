@@ -225,6 +225,34 @@ leadsquared:
       "transcript_activity_score",
     ]
 
+helena:
+  id: helena
+  logo: helena.png
+  i18n_key: helena
+  action: /helena
+  hook_type: account
+  allow_multiple_hooks: false
+  settings_json_schema:
+    {
+      "type": "object",
+      "properties":
+        {
+          "token": { "type": "string" },
+        },
+      "required": ["token"],
+      "additionalProperties": false,
+    }
+  settings_form_schema:
+    [
+      {
+        "label": "Token da API",
+        "type": "text",
+        "name": "token",
+        "validation": "required",
+        "help": "Token de acesso da API WTS/Helena (api.wts.chat), usado pra importar contatos com dados de origem de campanha na tela Marketing > Rastreamentos.",
+      },
+    ]
+
 bms:
   id: bms
   feature_flag: bms_integration
