@@ -273,6 +273,8 @@ Rails.application.routes.draw do
         resources :ad_leads, only: [:index, :update]
         get 'helena_wts/contacts', to: 'helena_wts#contacts'
         get 'helena_wts/all_contacts', to: 'helena_wts#all_contacts'
+        get 'helena_wts/ad_context', to: 'helena_wts#ad_context'
+        post 'helena_wts/send_conversion', to: 'helena_wts#send_conversion'
       end
 
       # Automação de cobrança (PIX/boleto) de saldo pré-pago do Meta Ads

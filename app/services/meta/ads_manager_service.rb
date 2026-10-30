@@ -462,7 +462,39 @@ class Meta::AdsManagerService
     )
     return ad unless ad.success
 
-    creative = ad.data['creative'] || {}
+    Result.new(success: true, data: [parse_creative_node(ad.data['creative'] || {})])
+  end
+
+  # Nome do anúncio/conjunto/campanha + criativo a partir só do ad_id —
+  # cobre o caso do Rastreamentos (contatos Helena/WTS só têm o ad_id via
+  # utm.sourceId, sem o resto que o Lead Ads já devolve de graça em
+  # leadgen_form_leads). Mesmo parse de criativo de creative_details
+  # (extraído pra parse_creative_node, compartilhado pelos dois) — sem
+  # duplicar a lógica de fallback de imagem/vídeo/carrossel.
+  def ad_context(ad_id:)
+    return Result.new(success: false, error: 'Página do Facebook não conectada.') unless connected?
+
+    ad = get(
+      "/#{ad_id}",
+      fields: 'name,adset_id,campaign_id,adset{name},campaign{name},' \
+              'creative{name,body,title,image_url,thumbnail_url,video_id,object_story_spec}'
+    )
+    return ad unless ad.success
+
+    Result.new(success: true, data: {
+      'ad_id' => ad_id,
+      'ad_name' => ad.data['name'],
+      'adset_id' => ad.data['adset_id'],
+      'adset_name' => ad.data.dig('adset', 'name'),
+      'campaign_id' => ad.data['campaign_id'],
+      'campaign_name' => ad.data.dig('campaign', 'name'),
+      'criativo' => parse_creative_node(ad.data['creative'] || {})
+    })
+  end
+
+  private
+
+  def parse_creative_node(creative)
     video = {}
     if creative['video_id'].present?
       video_result = get("/#{creative['video_id']}", fields: 'permalink_url,source,picture')
@@ -492,7 +524,7 @@ class Meta::AdsManagerService
     video_url = video['source'] || (video['permalink_url'].present? ? "https://www.facebook.com#{video['permalink_url']}" : nil)
     thumbnail = creative['thumbnail_url'] || video_data['image_url'] || video['picture']
 
-    Result.new(success: true, data: [{
+    {
       'imagem' => imagem,
       'video' => video_url,
       'thumbnail_url' => thumbnail,
@@ -506,8 +538,10 @@ class Meta::AdsManagerService
       'texto_principal' => creative['body'].presence || link_data['message'].presence || video_data['message'].presence,
       'descricao' => creative_description(link_data, video_data),
       'criativo_nome' => creative['name']
-    }])
+    }
   end
+
+  public
 
   # nivel: 'campaign' | 'adset' | 'ad'. edicao: hash já filtrado por
   # EDITABLE_FIELDS pelo controller antes de chegar aqui.
