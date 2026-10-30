@@ -18,10 +18,24 @@ module ServiceInvoices
       invoice = build_invoice(attrs)
       invoice.save!
       @establishment.provider_client.emitir(invoice)
+      schedule_fast_first_poll(invoice)
       invoice
     end
 
     private
+
+    # Primeira consulta de status logo depois de emitir, sem esperar o
+    # próximo ciclo do cron de 5 em 5 min (service_invoices_poll_status_job,
+    # config/schedule.yml) — antes uma nota emitida poucos segundos depois
+    # do ciclo anterior rodar ficava "processando" por quase 5 minutos até
+    # a próxima varredura, mesmo já estando pronta no webservice municipal
+    # bem antes disso. O cron de 5min continua existindo como rede de
+    # segurança pras notas que demorarem mais que isso pra autorizar.
+    def schedule_fast_first_poll(invoice)
+      return unless invoice.reload.status == 'processing'
+
+      ServiceInvoices::PollStatusJob.set(wait: 20.seconds).perform_later
+    end
 
     def build_invoice(attrs)
       valor_servicos = attrs.fetch(:valor_servicos).to_f
