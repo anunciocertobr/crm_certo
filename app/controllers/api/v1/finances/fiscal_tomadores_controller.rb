@@ -40,11 +40,13 @@ class Api::V1::Finances::FiscalTomadoresController < Api::V1::BaseController
   def fiscal_tomador_params
     params.require(:fiscal_tomador).permit(
       :nome, :cpf_cnpj, :email,
-      endereco: %i[logradouro numero bairro codigo_municipio uf cep]
+      endereco: %i[logradouro numero bairro codigo_municipio uf cep],
+      last_service: %i[discriminacao codigo_servico_municipal codigo_nbs codigo_tributacao_municipio
+                        valor_servicos aliquota_iss_pct]
     )
   end
 
   def serialize(tomador)
-    tomador.as_json(only: %i[id nome cpf_cnpj email endereco created_at updated_at])
+    tomador.as_json(only: %i[id nome cpf_cnpj email endereco last_service created_at updated_at])
   end
 end
