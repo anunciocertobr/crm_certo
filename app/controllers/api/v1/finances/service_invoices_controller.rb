@@ -1,9 +1,19 @@
 class Api::V1::Finances::ServiceInvoicesController < Api::V1::BaseController
   before_action :set_service_invoice, only: %i[show cancel pdf send_pdf]
 
+  # Filtros opcionais (todos vazios = comportamento de sempre, lista tudo) —
+  # usados tanto pela tabela normal quanto pelo dashboard de gráficos
+  # (ver ServiceInvoiceDashboardDialog no frontend).
   def index
     invoices = ServiceInvoice.includes(:fiscal_establishment).order(created_at: :desc)
+    invoices = invoices.where('tomador_nome ILIKE ?', "%#{params[:tomador_nome]}%") if params[:tomador_nome].present?
+    invoices = invoices.where('tomador_cpf_cnpj ILIKE ?', "%#{params[:tomador_cpf_cnpj]}%") if params[:tomador_cpf_cnpj].present?
+    invoices = invoices.where('discriminacao ILIKE ?', "%#{params[:discriminacao]}%") if params[:discriminacao].present?
+    invoices = invoices.where('created_at >= ?', Date.parse(params[:date_from]).beginning_of_day) if params[:date_from].present?
+    invoices = invoices.where('created_at <= ?', Date.parse(params[:date_to]).end_of_day) if params[:date_to].present?
     success_response(data: invoices.map { |i| serialize(i) })
+  rescue ArgumentError
+    error_response(ApiErrorCodes::INVALID_PARAMETER, 'date_from/date_to inválidos (use YYYY-MM-DD)', status: :bad_request)
   end
 
   def show
