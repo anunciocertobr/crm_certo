@@ -33,7 +33,39 @@ class Api::V1::Admin::MetaLeadFormsController < Api::V1::Admin::BaseController
     render json: { success: true }
   end
 
+  # GET /meta_lead_forms/all_leads — aba "Formulário" do Rastreamentos.
+  # Com 250 formulários mapeados, bater na Graph API ao vivo pra todos a
+  # cada carregamento de página seria lento demais (250 chamadas reais);
+  # por isso: (1) cacheia por form_id (15min — mesmo lead não muda de um
+  # load pro outro nesse intervalo), (2) por padrão só os `limit`
+  # formulários mapeados mais recentes (os mais relevantes pra
+  # rastreamento de campanha em andamento), não os 250. `limit=0` busca
+  # todos (pesado, de propósito não é o padrão).
+  def all_leads
+    limit = params[:limit].presence&.to_i
+    forms = MetaLeadForm.order(created_at: :desc)
+    forms = forms.limit(limit) if limit&.positive?
+
+    leads = forms.flat_map { |form| leads_for_form(form) }
+    leads.sort_by! { |l| l['created_time'].to_s }
+    leads.reverse!
+
+    render json: { success: true, data: leads.first(500) }
+  end
+
   private
+
+  def leads_for_form(form)
+    Rails.cache.fetch("meta_form_leads_#{form.form_id}", expires_in: 15.minutes) do
+      result = Meta::AdsManagerService.new.leadgen_form_leads(page_id: form.page_id, form_id: form.form_id)
+      next [] unless result.success
+
+      result.data.map { |lead| lead.merge('form_name' => form.form_name, 'form_id' => form.form_id) }
+    end
+  rescue StandardError => e
+    Rails.logger.error("MetaLeadFormsController#all_leads form_id=#{form.form_id}: #{e.message}")
+    []
+  end
 
   # Sempre substitui a lista inteira pela recebida (o front manda o estado
   # completo desejado, não um diff) — destroy_all roda na hora (não espera o
