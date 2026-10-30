@@ -269,9 +269,23 @@ module Guarulhos
     # provavelmente não reconhece esse elemento de jeito nenhum, mesmo
     # tecnicamente correto segundo o manual nacional (hipótese original,
     # antes de ter sido descartada por engano ao achar o exemplo do manual
-    # de RETORNO batendo com o formato enviado). Método mantido no código,
-    # só não chamado, até confirmar com a prefeitura/contador se e quando
-    # o schema real passa a aceitar.
+    # de RETORNO batendo com o formato enviado).
+    #
+    # 30/10/2026: pedido do usuário pra deixar isso "pronto pra reforma, só
+    # não emitir de verdade" — não achei um ambiente de homologação já
+    # cadastrado pra este CNPJ (a Giss/Ginfes exige cadastro próprio nesse
+    # ambiente, separado da produção, via atendimento@ginfes.com.br — ver
+    # https://focusnfe.com.br/guides/nfse/municipios-integrados/guarulhos-sp;
+    # não tentei nenhum host de homologação "adivinhado" contra esse CNPJ
+    # real sem essa confirmação, pra não arriscar outro xml_envio real sem
+    # necessidade). Então o método e o node continuam só preparados, GANHANDO
+    # um flag pra religar numa emissão isolada de teste quando/se um
+    # ambiente de homologação de verdade for confirmado — sem isso, toda
+    # emissão real continua exatamente como está hoje (sem IBSCBS).
+    def ibscbs_enabled?
+      ActiveModel::Type::Boolean.new.cast(GlobalConfigService.load('GUARULHOS_IBSCBS_ENABLED', false))
+    end
+
     def ibs_cbs_node(invoice)
       rgrp(tipos('IBSCBS'), [
         elem(tipos('finNFSe'), '0'),
@@ -311,8 +325,11 @@ module Guarulhos
           # indTotTrib=0 é o único valor aceito para "não informar".
           rgrp(tipos('trib'), [
             rgrp(tipos('totTrib'), [elem(tipos('indTotTrib'), '0')])
-          ])
-          # ibs_cbs_node(invoice) desabilitado — ver comentário na definição do método acima.
+          ]),
+          # Desligado por padrão (GlobalConfig GUARULHOS_IBSCBS_ENABLED) —
+          # ver comentário em ibscbs_enabled?/ibs_cbs_node acima. Só liga
+          # numa emissão de teste já confirmada contra homologação real.
+          (ibscbs_enabled? ? ibs_cbs_node(invoice) : '')
         ]),
         elem(tipos('IssRetido'), '2'),
         elem(tipos('ItemListaServico'), invoice.codigo_servico_municipal),
