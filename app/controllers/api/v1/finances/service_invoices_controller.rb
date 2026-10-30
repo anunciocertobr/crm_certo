@@ -1,5 +1,5 @@
 class Api::V1::Finances::ServiceInvoicesController < Api::V1::BaseController
-  before_action :set_service_invoice, only: %i[show cancel pdf send_pdf]
+  before_action :set_service_invoice, only: %i[show cancel pdf send_pdf destroy]
 
   # Filtros opcionais (todos vazios = comportamento de sempre, lista tudo) —
   # usados tanto pela tabela normal quanto pelo dashboard de gráficos
@@ -88,6 +88,23 @@ class Api::V1::Finances::ServiceInvoicesController < Api::V1::BaseController
   rescue StandardError => e
     error_response(ApiErrorCodes::EXTERNAL_SERVICE_ERROR, "Falha ao cancelar NFS-e: #{e.message}",
                    status: :bad_gateway)
+  end
+
+  # DELETE /finances/service_invoices/:id — só pra registros status=error,
+  # de propósito: nunca foram transmitidos com sucesso (numero_nfse vazio),
+  # então apagar aqui não altera nada perante a prefeitura, é só limpar o
+  # histórico de tentativas falhas (pedido do usuário). authorized/
+  # processing/pending continuam só podendo ser cancelados (ver #cancel),
+  # nunca apagados — são registro fiscal real ou em andamento.
+  def destroy
+    unless @invoice.status == 'error'
+      return error_response(ApiErrorCodes::BUSINESS_RULE_VIOLATION,
+                             'Só é possível excluir notas com erro — autorizada/processando precisa ser cancelada.',
+                             status: :unprocessable_entity)
+    end
+
+    @invoice.destroy!
+    success_response(data: { id: @invoice.id })
   end
 
   private
