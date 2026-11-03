@@ -726,6 +726,12 @@ class Meta::AdsManagerService
 
     act = "act_#{ad_account_id}"
     lead_form_id = nil
+    # Só guarda o id aqui (pra `discard_orphan_lead_form` nos catches
+    # abaixo) quando o formulário foi CRIADO de verdade por esta chamada —
+    # nunca quando foi reaproveitado de um `lead_form_id` já existente
+    # (ver comentário em `create_lead_form`). `orphan_lead_form_id`
+    # permanece nil o resto do método quando for reuso.
+    orphan_lead_form_id = nil
     campaign_id = nil
 
     begin
@@ -734,6 +740,7 @@ class Meta::AdsManagerService
         return step_error(lead_form, 'formulário de cadastro') unless lead_form.success
 
         lead_form_id = lead_form.data['id']
+        orphan_lead_form_id = lead_form_id unless lead_form.data['reused']
       end
 
     # Orçamento no nível da CAMPANHA (CBO) é opt-in: só entra quando o front
@@ -782,7 +789,7 @@ class Meta::AdsManagerService
       # (aí apareceu uma "ZZ CBO sem teto" parada na conta depois do teste).
       if cbo_check
         discard_orphan_campaign(campaign_id)
-        discard_orphan_lead_form(lead_form_id, campanha)
+        discard_orphan_lead_form(orphan_lead_form_id, campanha)
         return Result.new(success: false, error: cbo_check)
       end
     end
@@ -798,7 +805,7 @@ class Meta::AdsManagerService
         # então deletar o que este mesmo fluxo criou é seguro.
         return result.tap do
           discard_orphan_campaign(campaign_id)
-          discard_orphan_lead_form(lead_form_id, campanha)
+          discard_orphan_lead_form(orphan_lead_form_id, campanha)
         end
       end
 
@@ -817,7 +824,7 @@ class Meta::AdsManagerService
       # parcial (só 1 de 3 conjuntos) ficou parada na conta de teste
       # "Anuncio Certo (Boleto)", nenhuma das duas se limpou sozinha.
       discard_orphan_campaign(campaign_id)
-      discard_orphan_lead_form(lead_form_id, campanha)
+      discard_orphan_lead_form(orphan_lead_form_id, campanha)
       raise
     end
   end
@@ -3631,7 +3638,16 @@ class Meta::AdsManagerService
     # genérico. Antes disso, criar/duplicar campanha de Formulário SEMPRE
     # gerava um formulário novo (nome padrão, só Nome+Email), mesmo
     # duplicando um anúncio que já usava um formulário de verdade.
-    return Result.new(success: true, data: { 'id' => campanha['lead_form_id'] }) if campanha['lead_form_id'].presence
+    #
+    # `reused: true` aqui é obrigatório: `create_campaign_full` usa isso
+    # pra NUNCA arquivar este id como "órfão" se uma etapa posterior
+    # falhar — sem essa marca, uma duplicação que falhasse depois desta
+    # linha arquivava (ARCHIVED) um formulário de lead REAL, em uso por
+    # outras campanhas/anúncios ativos, só porque ele foi reaproveitado
+    # aqui (bug real encontrado 03/11/2026 investigando um 500 ao
+    # duplicar campanha entre BMs — só não chegou a arquivar de verdade
+    # porque o token da sessão não tinha permissão na Página de origem).
+    return Result.new(success: true, data: { 'id' => campanha['lead_form_id'], 'reused' => true }) if campanha['lead_form_id'].presence
 
     questions = campanha['lead_questions'].presence || [{ type: 'FULL_NAME' }, { type: 'EMAIL' }]
     privacy_url = campanha['privacy_policy_url'].presence || 'https://www.anunciocertobr.com.br/privacidade'
