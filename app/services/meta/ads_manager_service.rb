@@ -3194,6 +3194,12 @@ class Meta::AdsManagerService
   # externa nesse fluxo, só o CTA de iniciar conversa.
   def build_creative(act:, campanha:, lead_form_id: nil)
     return build_carousel_creative(act: act, campanha: campanha) if campanha['carousel_items'].is_a?(Array) && campanha['carousel_items'].any?
+    # Mídia DIFERENTE por posicionamento (Feed/Stories/Horizontal) — pedido
+    # do usuário. O front só manda isto quando o usuário customizou pelo
+    # menos 1 dos 3 (ver placementsAreUniform no TrafficPanelPage); com os
+    # 3 iguais continua vindo no formato antigo (ad_id_origem/asset_base64
+    # achatado), caminho rápido de sempre, sem passar por aqui.
+    return build_placement_customized_creative(act: act, campanha: campanha, lead_form_id: lead_form_id) if campanha['placements'].is_a?(Hash)
 
     if campanha['ad_id_origem'].present?
       carousel_items = resolve_carousel_items_from_source_ad(campanha['ad_id_origem'])
@@ -3340,6 +3346,150 @@ class Meta::AdsManagerService
     end
 
     post("/#{act}/adcreatives", { object_story_spec: story_spec.to_json })
+  end
+
+  # Mídia diferente por posicionamento (Feed/Stories/Horizontal) — pedido do
+  # usuário, 03/11/2026. Usa a API de "Placement Asset Customization" da
+  # Meta (asset_feed_spec + asset_customization_rules no /adcreatives, NÃO
+  # é Dynamic Creative — um só ad, um asset por posicionamento, não testes
+  # automáticos de combinação). Doc oficial:
+  # https://developers.facebook.com/documentation/ads-commerce/marketing-api/dynamic-creative/placement-asset-customization
+  #
+  # Diferente do caminho de cima: a Meta EXPLICITAMENTE não reaproveita post
+  # existente com asset_feed_spec (`ad_id_origem` sozinho não helps aqui) —
+  # por isso sempre baixa/reenvia a mídia de verdade pra cada posicionamento
+  # customizado, mesmo em "duplicar". O front só entra neste caminho quando
+  # o usuário editou pelo menos 1 dos 3 posicionamentos (ver
+  # placementsAreUniform) — com os 3 iguais, o payload antigo (mais rápido)
+  # é usado em vez disso.
+  PLACEMENT_LABEL_RULES = {
+    'stories' => { customization_spec: { publisher_platforms: %w[facebook instagram], facebook_positions: ['story'], instagram_positions: ['story'] } },
+    'feed' => { customization_spec: { publisher_platforms: %w[facebook instagram], facebook_positions: ['feed'], instagram_positions: ['stream'] } },
+    # "Horizontal" = tudo que não é Feed nem Stories (right_hand_column,
+    # marketplace, video_feeds, search, notification, Audience Network,
+    # etc.) — regra de posicionamento vazia é o fallback/padrão da Meta pro
+    # que sobrar, confirmado no exemplo oficial da doc (caso do Threads).
+    'horizontal' => { customization_spec: {} }
+  }.freeze
+
+  def build_placement_customized_creative(act:, campanha:, lead_form_id: nil)
+    placements = campanha['placements']
+    resolved = {}
+    %w[feed stories horizontal].each do |slot|
+      spec = placements[slot] || {}
+      asset = if spec['ad_id_origem'].present?
+                resolve_asset_from_source_ad(spec['ad_id_origem'])
+              else
+                resolve_asset(spec)
+              end
+      return asset unless asset.success
+
+      resolved[slot] = asset.data # [base64, mimetype]
+    end
+
+    mimetypes = resolved.values.map { |(_base64, mimetype)| mimetype.to_s.start_with?('video/') ? 'video' : 'image' }.uniq
+    if mimetypes.size > 1
+      return Result.new(
+        success: false,
+        error: 'Não dá pra misturar imagem e vídeo entre os posicionamentos (Feed/Stories/Horizontal) — escolha só imagens ou só vídeos pra esse anúncio.'
+      )
+    end
+    is_video = mimetypes.first == 'video'
+
+    page_id = page_id_for(campanha)
+    if lead_form_id.present? && campanha['link'].blank? && page_website_for(page_id).blank?
+      return Result.new(
+        success: false,
+        error: 'Esta Página do Facebook não tem um site cadastrado, e a Meta exige um link externo no ' \
+               'anúncio de Formulário mesmo o formulário abrindo dentro do próprio anúncio. Adicione um site em ' \
+               'Configurações da Página no Gerenciador de Negócios e tente de novo.'
+      )
+    end
+
+    # Upload de cada CONTEÚDO único (3 chamadas no máximo — nunca reaproveita
+    # post existente aqui, ver comentário acima). A Meta recusa o /adcreatives
+    # inteiro com "valores de ativo duplicados" (subcode 1815629) quando 2
+    # posicionamentos acabam com a MESMA imagem/vídeo (ex.: usuário só
+    # customizou 1 dos 3, os outros 2 continuam iguais) — confirmado ao vivo
+    # 03/11/2026. Por isso dedupe pelo CONTEÚDO (base64) antes de subir:
+    # conteúdo igual sobe uma vez só e os posicionamentos que o usam
+    # compartilham o mesmo label/entrada em images[]/videos[].
+    content_uploads = {} # base64 => { hash:/video_id:, label: }
+    uploaded = {}
+    resolved.each do |slot, (base64, mimetype)|
+      if content_uploads.key?(base64)
+        uploaded[slot] = content_uploads[base64]
+        next
+      end
+
+      label = "placement_#{slot}"
+      entry = if is_video
+                video = post_multipart_video(act: act, binary: Base64.decode64(base64))
+                return video unless video.success
+
+                { video_id: video.data['id'], label: label }
+              else
+                image = post("/#{act}/adimages", { bytes: base64 })
+                return image unless image.success
+
+                image_hash = image.data['images']&.values&.first&.dig('hash')
+                return Result.new(success: false, error: "Upload da imagem do posicionamento #{slot} não retornou hash.") if image_hash.blank?
+
+                { hash: image_hash, label: label }
+              end
+      content_uploads[base64] = entry
+      uploaded[slot] = entry
+    end
+
+    cta_type = if lead_form_id.present?
+                 'SIGN_UP'
+               elsif messaging_flow?(campanha)
+                 messaging_cta(campanha)[:type]
+               else
+                 'LEARN_MORE'
+               end
+    cta_value =
+      if lead_form_id.present?
+        { lead_gen_form_id: lead_form_id }
+      elsif messaging_flow?(campanha)
+        messaging_cta(campanha)[:value]
+      else
+        { link: campanha['link'].presence || "https://www.facebook.com/#{page_id}" }
+      end
+
+    asset_feed_spec = {
+      bodies: [{ text: campanha['body'] }],
+      titles: [{ text: campanha['title'] }],
+      descriptions: campanha['description'].present? ? [{ text: campanha['description'] }] : [],
+      link_urls: [{ website_url: campanha['link'].presence || (lead_form_id.present? && page_website_for(page_id)) || "https://www.facebook.com/#{page_id}" }],
+      call_to_actions: [{ type: cta_type, value: cta_value }],
+      ad_formats: [is_video ? 'SINGLE_VIDEO' : 'SINGLE_IMAGE'],
+      optimization_type: 'PLACEMENT',
+      asset_customization_rules: uploaded.map do |slot, asset|
+        rule = PLACEMENT_LABEL_RULES.fetch(slot).dup
+        rule[is_video ? :video_label : :image_label] = { name: asset[:label] }
+        rule
+      end
+    }.tap do |spec|
+      # uniq por label: 2+ posicionamentos com o MESMO conteúdo compartilham
+      # a mesma entrada em uploaded (ver dedupe acima) — sem este uniq, a
+      # Meta recusa o /adcreatives inteiro com "valores de ativo duplicados"
+      # (subcode 1815629) por listar o mesmo hash/video_id mais de uma vez
+      # em images[]/videos[], mesmo com asset_customization_rules corretas.
+      unique_assets = uploaded.values.uniq { |a| a[:label] }
+      if is_video
+        spec[:videos] = unique_assets.map { |a| { video_id: a[:video_id], adlabels: [{ name: a[:label] }] } }
+      else
+        spec[:images] = unique_assets.map { |a| { hash: a[:hash], adlabels: [{ name: a[:label] }] } }
+      end
+    end
+
+    object_story_spec = { page_id: page_id }.tap do |spec|
+      ig_id = instagram_id_for(campanha)
+      spec[:instagram_user_id] = ig_id if ig_id.present?
+    end
+
+    post("/#{act}/adcreatives", { object_story_spec: object_story_spec.to_json, asset_feed_spec: asset_feed_spec.to_json })
   end
 
   # Carrossel — não existe no modal original (só tinha um campo de mídia),
