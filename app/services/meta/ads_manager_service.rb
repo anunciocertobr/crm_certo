@@ -458,7 +458,8 @@ class Meta::AdsManagerService
 
     ad = get(
       "/#{ad_id}",
-      fields: 'name,creative{name,body,title,image_url,thumbnail_url,video_id,object_story_spec}'
+      fields: 'name,creative{name,body,title,image_url,thumbnail_url,video_id,object_story_spec,' \
+              'asset_feed_spec{videos{video_id},images{url}}}'
     )
     return ad unless ad.success
 
@@ -477,7 +478,8 @@ class Meta::AdsManagerService
     ad = get(
       "/#{ad_id}",
       fields: 'name,adset_id,campaign_id,adset{name},campaign{name},' \
-              'creative{name,body,title,image_url,thumbnail_url,video_id,object_story_spec}'
+              'creative{name,body,title,image_url,thumbnail_url,video_id,object_story_spec,' \
+              'asset_feed_spec{videos{video_id},images{url}}}'
     )
     return ad unless ad.success
 
@@ -495,9 +497,21 @@ class Meta::AdsManagerService
   private
 
   def parse_creative_node(creative)
+    # Criativo dinâmico Advantage+ (ex. anúncio feito a partir de um Reel/
+    # post existente): `video_id`/`image_url` no nível do creative vêm
+    # ausentes — o único jeito de achar QUALQUER mídia real é dentro de
+    # `asset_feed_spec.videos[0].video_id` / `.images[0].url` (confirmado
+    # ao vivo 03/11/2026 — sem isso, o único fallback que sobrava era
+    # `thumbnail_url`, um preview de ~64x64px que o WhatsApp recusa enviar
+    # silenciosamente). `.first` porque dynamic creative pode ter vários
+    # vídeos/imagens testados — não dá pra saber qual "ganhou" sem outra
+    # chamada, pega o primeiro como melhor esforço.
+    video_id = creative['video_id'].presence || creative.dig('asset_feed_spec', 'videos', 0, 'video_id')
+    asset_feed_image = creative.dig('asset_feed_spec', 'images', 0, 'url')
+
     video = {}
-    if creative['video_id'].present?
-      video_result = get("/#{creative['video_id']}", fields: 'permalink_url,source,picture')
+    if video_id.present?
+      video_result = get("/#{video_id}", fields: 'permalink_url,source,picture')
       video = video_result.success ? video_result.data : {}
     end
 
@@ -513,7 +527,13 @@ class Meta::AdsManagerService
     # object_story_spec.link_data.picture. Sem esse fallback, esses
     # anúncios sempre voltavam "Nenhum criativo encontrado" mesmo tendo
     # imagem de verdade.
-    imagem = creative['image_url'] || link_data['picture']
+    # `video['picture']` (foto do próprio vídeo, ~160x160px) só entra como
+    # ÚLTIMO fallback pra `imagem` — pequena, mas uma foto de verdade do
+    # anúncio, bem diferente do preview genérico `thumbnail_url` (~64x64px,
+    # recusado silenciosamente pelo WhatsApp — por isso NUNCA vai em
+    # `imagem`, só em `thumbnail_url` abaixo, pra uso de UI tipo
+    # hover-preview onde esse tamanho é esperado).
+    imagem = creative['image_url'] || link_data['picture'] || asset_feed_image || video['picture']
 
     # `source` (o .mp4 baixável) exige permissão de vídeo que este token não
     # tem — a Graph API simplesmente omite o campo, sem erro. `permalink_url`
