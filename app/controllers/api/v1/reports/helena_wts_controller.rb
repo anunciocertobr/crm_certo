@@ -46,7 +46,16 @@ module Api
             return
           end
 
-          result = Meta::AdsManagerService.new.ad_context(ad_id: ad_id)
+          # ::Meta (prefixo top-level), mesmo motivo do ::Integrations usado
+          # acima em #contacts/#all_contacts: existe um módulo Api::V1::Meta
+          # (controllers) que sombreia o Meta de nível raiz (services) na
+          # resolução de constante do Ruby dentro desta classe — sem o `::`,
+          # vira "uninitialized constant Api::V1::Meta::AdsManagerService"
+          # mesmo com Meta::AdsManagerService existindo certinho no lugar
+          # certo (bug real em produção, confirmado 03/11/2026: a aba
+          # "Externo" do Rastreamentos nunca atribuía campanha/conjunto/
+          # anúncio/criativo porque TODA chamada a este endpoint quebrava).
+          result = ::Meta::AdsManagerService.new.ad_context(ad_id: ad_id)
           if result.success
             Rails.cache.write(cache_key, result.data, expires_in: 12.hours)
             render json: { success: true, data: result.data }
@@ -73,7 +82,9 @@ module Api
           ad_lead = AdLeadLike.new(ad_id: ad_id, ctwaclid: params[:ctwa_clid].presence, fbp: nil, fbc: nil)
           contact = ContactLike.new(phone_number: params[:phone].presence)
 
-          result = Meta::ConversionsApiService.new.send_event(
+          # ::Meta — mesmo sombreamento de Api::V1::Meta explicado em
+          # #ad_context acima; esse bug também derrubava "Enviar pro Meta".
+          result = ::Meta::ConversionsApiService.new.send_event(
             event_name: params[:event_name].presence || 'Lead',
             ad_lead: ad_lead,
             contact: contact,
