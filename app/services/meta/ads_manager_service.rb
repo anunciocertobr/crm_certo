@@ -483,6 +483,13 @@ class Meta::AdsManagerService
     )
     return ad unless ad.success
 
+    # Mesmo resumo de público-alvo configurado no conjunto que já existe
+    # pra "Ver Leads" (`enrich_leads_with_targeting_context!` /
+    # `adset_targeting_summary`) — pedido do usuário pra também aparecer
+    # na coluna "Público" da aba Externo (Rastreamentos/Helena), que usa
+    # este mesmo `ad_context` pra enriquecer campanha/conjunto/anúncio.
+    publico_alvo = ad.data['adset_id'].present? ? adset_targeting_summary(ad.data['adset_id']) : nil
+
     Result.new(success: true, data: {
       'ad_id' => ad_id,
       'ad_name' => ad.data['name'],
@@ -490,7 +497,8 @@ class Meta::AdsManagerService
       'adset_name' => ad.data.dig('adset', 'name'),
       'campaign_id' => ad.data['campaign_id'],
       'campaign_name' => ad.data.dig('campaign', 'name'),
-      'criativo' => parse_creative_node(ad.data['creative'] || {})
+      'criativo' => parse_creative_node(ad.data['creative'] || {}),
+      'publico_alvo' => publico_alvo
     })
   end
 
