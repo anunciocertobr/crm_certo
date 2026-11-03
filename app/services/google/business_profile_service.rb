@@ -13,9 +13,21 @@ class Google::BusinessProfileService
   ACCOUNT_MANAGEMENT_URL = 'https://mybusinessaccountmanagement.googleapis.com/v1'.freeze
   BUSINESS_INFO_URL = 'https://mybusinessbusinessinformation.googleapis.com/v1'.freeze
   LEGACY_URL = 'https://mybusiness.googleapis.com/v4'.freeze
+  # Quarto host — API separada das 3 acima, mesmo escopo OAuth
+  # (business.manage), por isso reaproveita o mesmo access_token.
+  PERFORMANCE_URL = 'https://businessprofileperformance.googleapis.com/v1'.freeze
   LOCATION_LIST_FIELDS = 'name,title,phoneNumbers,websiteUri,storefrontAddress,openInfo'.freeze
   LOCATION_DETAIL_FIELDS = 'title,phoneNumbers,websiteUri,storefrontAddress,regularHours,specialHours,categories,' \
                            'serviceArea,serviceItems,profile,openInfo,latlng'.freeze
+  # Métricas diárias reais do enum DailyMetric (ver developers.google.com/
+  # my-business/reference/performance) — fora BUSINESS_CONVERSATIONS e
+  # BUSINESS_FOOD_ORDERS, marcadas obsoletas na doc oficial.
+  DAILY_METRICS = %w[
+    BUSINESS_IMPRESSIONS_DESKTOP_MAPS BUSINESS_IMPRESSIONS_DESKTOP_SEARCH
+    BUSINESS_IMPRESSIONS_MOBILE_MAPS BUSINESS_IMPRESSIONS_MOBILE_SEARCH
+    BUSINESS_DIRECTION_REQUESTS CALL_CLICKS WEBSITE_CLICKS MESSAGING_CLICKS
+    BUSINESS_BOOKINGS BUSINESS_FOOD_MENU_CLICKS
+  ].freeze
 
   class Error < StandardError; end
 
@@ -74,7 +86,51 @@ class Google::BusinessProfileService
     delete(LEGACY_URL, post_name)
   end
 
+  # Métricas de desempenho (visualizações no Maps/Busca, cliques pra
+  # ligar/site/mensagem, pedidos de rota etc.) — API separada
+  # (businessprofileperformance), substituiu o antigo `reportInsights` da
+  # v4 (deprecado). `location_name` no formato "locations/{id}" (mesmo
+  # formato devolvido por #all_locations). Achata a resposta pra
+  # {metric => [{date:, value:}]}, mais fácil de consumir no relatório do
+  # que o formato aninhado original da API.
+  #
+  # ⚠️ Testado em 03/11/2026 só até confirmar que a REQUISIÇÃO está bem
+  # formada (dailyMetrics repetido + dailyRange.*.year/month/day — erro de
+  # argumento corrigido nesse teste) — a API devolveu 403 "Business Profile
+  # Performance API has not been used in project ... or it is disabled",
+  # porque essa API específica (businessprofileperformance.googleapis.com)
+  # nunca foi habilitada no projeto Google Cloud usado por esta conta,
+  # diferente das outras 3 (account management/business info/legacy) que
+  # já funcionam. Precisa ser habilitada manualmente em
+  # https://console.developers.google.com/apis/api/businessprofileperformance.googleapis.com/overview
+  # (ação do dono da conta Google, não é código) antes de dar pra confirmar
+  # dado real.
+  def performance(location_name, date_start:, date_stop:)
+    params = { dailyMetrics: DAILY_METRICS }
+    params.merge!(date_range_params('dailyRange.start_date', date_start))
+    params.merge!(date_range_params('dailyRange.end_date', date_stop))
+
+    result = get(PERFORMANCE_URL, "#{location_name}:fetchMultiDailyMetricsTimeSeries", **params)
+    flatten_performance(result)
+  end
+
   private
+
+  def date_range_params(prefix, date_string)
+    date = date_string.is_a?(Date) ? date_string : Date.parse(date_string)
+    { "#{prefix}.year" => date.year, "#{prefix}.month" => date.month, "#{prefix}.day" => date.day }
+  end
+
+  def flatten_performance(result)
+    series = result.dig('multiDailyMetricTimeSeries', 0, 'dailyMetricTimeSeries') || []
+    series.each_with_object({}) do |entry, acc|
+      dated_values = entry.dig('timeSeries', 'datedValues') || []
+      acc[entry['dailyMetric']] = dated_values.map do |dv|
+        d = dv['date'] || {}
+        { 'date' => format('%04d-%02d-%02d', d['year'], d['month'], d['day'] || 1), 'value' => dv['value'].to_i }
+      end
+    end
+  end
 
   def access_token
     Google::WorkspaceTokenService.new.access_token

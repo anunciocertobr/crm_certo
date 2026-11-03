@@ -267,6 +267,8 @@ Rails.application.routes.draw do
         get 'analytics/properties', to: 'analytics#properties'
         get 'analytics/overview', to: 'analytics#overview'
         get 'analytics/by_channel', to: 'analytics#by_channel'
+        get 'business_profile/locations', to: 'business_profile#locations'
+        get 'business_profile/performance', to: 'business_profile#performance'
         post 'meta_ads_manager', to: 'meta_ads_manager#handle'
         post 'meta_infrastructure', to: 'meta_infrastructure#handle'
         post 'ga4_infrastructure', to: 'ga4_infrastructure#handle'
