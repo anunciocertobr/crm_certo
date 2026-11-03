@@ -43,7 +43,7 @@ class Api::V1::ContactsController < Api::V1::BaseController
     apply_pagination
 
     paginated_response(
-      data: ContactSerializer.serialize_collection(@contacts, include_contact_inboxes: @include_contact_inboxes),
+      data: ContactSerializer.serialize_collection(@contacts, include_contact_inboxes: @include_contact_inboxes, include_pipelines: true, include_ad_lead: true),
       collection: @contacts,
       message: 'Contacts retrieved successfully'
     )
@@ -73,7 +73,7 @@ class Api::V1::ContactsController < Api::V1::BaseController
     apply_pagination
 
     paginated_response(
-      data: ContactSerializer.serialize_collection(@contacts, include_contact_inboxes: @include_contact_inboxes),
+      data: ContactSerializer.serialize_collection(@contacts, include_contact_inboxes: @include_contact_inboxes, include_pipelines: true, include_ad_lead: true),
       collection: @contacts,
       message: 'Contacts search completed successfully'
     )
