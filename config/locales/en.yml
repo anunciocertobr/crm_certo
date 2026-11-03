@@ -269,6 +269,10 @@ en:
       name: 'Dropbox'
       short_description: 'Connect a Dropbox account to browse and manage files from the CRM.'
       description: 'Connect a Dropbox account to browse, upload and manage files directly from the Drive/Dropbox tab in the CRM.'
+    tiktok:
+      name: 'TikTok'
+      short_description: 'Connect a TikTok account to publish videos from the Post Manager.'
+      description: 'Connect a TikTok account (TikTok for Developers) to publish videos directly from the Traffic Panel Post Manager. Actual publishing requires the Content Posting API approved by TikTok for the app.'
     linear:
       name: 'Linear'
       short_description: 'Create and link Linear issues directly from conversations.'

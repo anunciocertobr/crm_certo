@@ -850,6 +850,7 @@ Rails.application.routes.draw do
       # por google/callback, microsoft/callback etc. acima.
       post 'google_workspace/callback', to: 'integrations/google_workspace_authorizations#callback'
       post 'dropbox/callback', to: 'integrations/dropbox_authorizations#callback'
+      post 'tiktok/callback', to: 'integrations/tiktok_authorizations#callback'
       post 'mercado_livre/callback', to: 'integrations/mercado_livre_authorizations#callback'
       post 'shopee/callback', to: 'integrations/shopee_authorizations#callback'
       get 'google_ads/connections', to: 'integrations/google_ads_authorizations#connections'

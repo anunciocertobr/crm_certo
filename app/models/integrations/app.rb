@@ -4,6 +4,7 @@ class Integrations::App
   include Linear::IntegrationHelper
   include Hubspot::IntegrationHelper
   include Dropbox::IntegrationHelper
+  include Tiktok::IntegrationHelper
   include MercadoLivre::IntegrationHelper
   include Shopee::IntegrationHelper
   include GoogleConcern
@@ -50,6 +51,8 @@ class Integrations::App
       generate_google_token('google_ads')
     when 'dropbox'
       generate_dropbox_token('dropbox')
+    when 'tiktok'
+      generate_tiktok_token('tiktok')
     when 'mercado_livre'
       generate_mercado_livre_token('mercado_livre')
     when 'shopee'
@@ -74,6 +77,8 @@ class Integrations::App
       build_google_ads_action
     when 'dropbox'
       build_dropbox_action
+    when 'tiktok'
+      build_tiktok_action
     when 'mercado_livre'
       build_mercado_livre_action
     when 'shopee'
@@ -97,7 +102,15 @@ class Integrations::App
       GlobalConfigService.load('MERCADO_LIVRE_CLIENT_ID', nil).present?
     when 'shopee'
       GlobalConfigService.load('SHOPEE_PARTNER_ID', nil).present?
-    when 'leadsquared', 'bms', 'helena'
+    when 'leadsquared', 'bms', 'helena', 'tiktok'
+      # Sempre `true` (não condicionado a TIKTOK_CLIENT_KEY já configurado)
+      # pelo mesmo motivo de helena/bms/leadsquared: o card PRECISA
+      # aparecer na grade de Integrações pra o usuário conseguir abrir a
+      # tela de configurar as credenciais pela primeira vez — descoberto
+      # investigando por que o card do Dropbox nunca aparece na grade (ele
+      # cai no `else: false` abaixo, sem branch própria aqui — bug
+      # pré-existente, não corrigido agora por estar fora do escopo deste
+      # pedido, mas NÃO repetir esse padrão pro tiktok).
       true
     when 'webhook', 'dashboard_apps', 'openai', 'gemini', 'google_workspace', 'groq', 'google_ads', 'elevenlabs', 'huggingface'
       true
@@ -268,6 +281,30 @@ class Integrations::App
     ].join('&')
   end
 
+  # Mesmo motivo do Dropbox: TikTok exige client_key/secret do PRÓPRIO app
+  # TikTok for Developers (TIKTOK_CLIENT_KEY/TIKTOK_CLIENT_SECRET em
+  # GlobalConfig, ver TiktokPage.tsx) — não dá pra reaproveitar nenhuma
+  # outra conexão já existente. `scope` precisa bater com o que está
+  # aprovado pro app no painel da TikTok (Login Kit vs. Content Posting
+  # API são produtos separados, cada um com seus próprios escopos e
+  # processo de revisão) — `video.publish` só funciona depois da TikTok
+  # aprovar a Content Posting API pro app; até lá, a conexão em si
+  # (user.info.basic) continua funcionando normalmente.
+  def build_tiktok_action
+    client_key = GlobalConfigService.load('TIKTOK_CLIENT_KEY', nil)
+    return nil unless client_key.present?
+
+    scope = 'user.info.basic,video.publish'
+
+    [
+      "#{params[:action]}?client_key=#{client_key}",
+      'response_type=code',
+      "redirect_uri=#{CGI.escape(self.class.tiktok_integration_url)}",
+      "scope=#{CGI.escape(scope)}",
+      "state=#{encode_state}"
+    ].join('&')
+  end
+
   # OAuth2 authorization-code padrão, igual Dropbox — cada conta final do
   # CRM conecta a PRÓPRIA loja ML (diferente do iFood, que usa uma única
   # credencial client_credentials pra conta inteira do sistema).
@@ -342,6 +379,10 @@ class Integrations::App
 
   def self.dropbox_integration_url
     "#{ENV.fetch('FRONTEND_URL', nil)}/settings/integrations/dropbox/callback"
+  end
+
+  def self.tiktok_integration_url
+    "#{ENV.fetch('FRONTEND_URL', nil)}/settings/integrations/tiktok/callback"
   end
 
   def self.mercado_livre_integration_url

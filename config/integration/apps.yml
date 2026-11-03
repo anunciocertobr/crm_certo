@@ -116,6 +116,23 @@ dropbox:
   hook_type: account
   allow_multiple_hooks: false
 
+# Pedido do usuário: card do TikTok em Integrações, pra usar depois em
+# Gestor de Posts (Marketing > Painel Tráfego). Exige um app TikTok for
+# Developers próprio (TIKTOK_CLIENT_KEY/TIKTOK_CLIENT_SECRET em
+# GlobalConfig, configurados na própria tela — ver TiktokPage.tsx, mesmo
+# padrão do Developer Token do Google Ads). Publicar de verdade exige a
+# Content Posting API aprovada pela TikTok pro app (pode levar dias/não
+# estar aprovado ainda) — esta integração cobre a CONEXÃO (OAuth +
+# guardar o token); o botão de publicar em Gestor de Posts é construído
+# à parte, depois que a conexão existir.
+tiktok:
+  id: tiktok
+  logo: tiktok.png
+  i18n_key: tiktok
+  action: https://www.tiktok.com/v2/auth/authorize/
+  hook_type: account
+  allow_multiple_hooks: false
+
 linear:
   id: linear
   logo: linear.png
