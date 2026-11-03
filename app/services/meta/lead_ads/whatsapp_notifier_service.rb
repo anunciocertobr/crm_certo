@@ -466,13 +466,28 @@ module Meta
       # formulário, a imagem, data e os dados" pedido explicitamente. Sem
       # ad_id (lead veio de um teste/preview, por exemplo) simplesmente não
       # anexa imagem, não é erro.
+      #
+      # NUNCA usa `thumbnail_url` aqui (diferente de outras telas, como o
+      # hover-preview de Rastreamentos, onde esse thumbnail pequeno é
+      # apropriado) — pra formatos de anúncio sem video_id/image_url
+      # expostos pela Graph API (Reels/Advantage+ com criativo só por
+      # object_story_spec.page_id+instagram_user_id, sem video_data), o
+      # único fallback que a API devolve é o endpoint de preview de anúncio
+      # (`.../emg1/v/t13/...?...p64x64...`), uma imagem de ~64x64px —
+      # minúscula demais, e confirmado ao vivo (03/11/2026) que o
+      # WhatsApp/Evolution recusa silenciosamente o envio com ela: pra
+      # grupo a mensagem inteira (texto + imagem) nunca chega; pra número
+      # direto só o texto chega, a imagem some sem erro visível em lugar
+      # nenhum (nem no nosso banco, nem no retorno da API do Evolution).
+      # Sem imagem de verdade, a notificação sai só em texto — ainda assim
+      # chega com todos os dados reais do lead, que é o que importa.
       def creative_image_url(sections)
         return nil unless section?(:creative_image, sections)
 
         detalhes = creative_details
         return nil if detalhes.blank?
 
-        detalhes['imagem'].presence || detalhes['thumbnail_url'].presence
+        detalhes['imagem'].presence
       end
     end
   end
