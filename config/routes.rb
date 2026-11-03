@@ -279,6 +279,7 @@ Rails.application.routes.draw do
         post 'google_contacts', to: 'google_contacts#handle'
         post 'criativos', to: 'criativos#handle'
         resources :ad_leads, only: [:index, :update]
+        get 'helena_wts/accounts', to: 'helena_wts#accounts'
         get 'helena_wts/contacts', to: 'helena_wts#contacts'
         get 'helena_wts/all_contacts', to: 'helena_wts#all_contacts'
         get 'helena_wts/ad_context', to: 'helena_wts#ad_context'

@@ -231,12 +231,18 @@ helena:
   i18n_key: helena
   action: /helena
   hook_type: account
-  allow_multiple_hooks: false
+  # Pedido do usuário: várias contas Helena ao mesmo tempo (cada conta tem
+  # seu próprio token da API). Mesmo padrão já usado pro google_ads (ver
+  # comentário lá) — cada hook = 1 conta, distinguida pelo campo "label"
+  # abaixo (Helena não tem um id de conta próprio pra resolver automático
+  # como o google_ads faz com reference_id, então é texto livre).
+  allow_multiple_hooks: true
   settings_json_schema:
     {
       "type": "object",
       "properties":
         {
+          "label": { "type": "string" },
           "token": { "type": "string" },
         },
       "required": ["token"],
@@ -244,6 +250,12 @@ helena:
     }
   settings_form_schema:
     [
+      {
+        "label": "Nome da conta",
+        "type": "text",
+        "name": "label",
+        "help": "Como esta conta Helena vai aparecer pra escolher (ex.: nome do cliente/projeto) — útil só quando há mais de uma.",
+      },
       {
         "label": "Token da API",
         "type": "text",

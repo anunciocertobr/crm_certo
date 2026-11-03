@@ -11,7 +11,7 @@ module Api
         def contacts
           limit = (params[:limit].presence || 100).to_i
           page = (params[:page].presence || 1).to_i
-          service = ::Integrations::HelenaWts::ContactsService.new
+          service = ::Integrations::HelenaWts::ContactsService.new(client: ::Integrations::HelenaWts::BaseClient.new(hook_id: params[:hook_id].presence))
           result = service.list(page: page, limit: limit)
           render json: { items: result[:items], meta: result[:raw].is_a?(Hash) ? result[:raw].except("items", "data") : {} }, status: :ok
         rescue => e
@@ -21,12 +21,26 @@ module Api
 
         def all_contacts
           limit = (params[:limit].presence || 100).to_i
-          service = ::Integrations::HelenaWts::ContactsService.new
+          service = ::Integrations::HelenaWts::ContactsService.new(client: ::Integrations::HelenaWts::BaseClient.new(hook_id: params[:hook_id].presence))
           items = service.fetch_all(limit: limit)
           render json: { items: items }, status: :ok
         rescue => e
           Rails.logger.error("[HelenaWts] all_contacts error: #{e.message}")
           render json: { error: e.message }, status: :bad_request
+        end
+
+        # GET /reports/helena_wts/accounts — contas Helena conectadas
+        # (Configurações > Integrações > Helena), pro seletor da aba
+        # Externo (pedido do usuário: "selecionar os que tem igual a
+        # seleção de bm do formulário" + "+" pra adicionar sem saber de
+        # outra tela). `label` cai pro id curto quando a conta não tem
+        # nome configurado (conta única antiga, criada antes deste campo
+        # existir).
+        def accounts
+          hooks = ::Integrations::Hook.where(app_id: "helena").order(:created_at)
+          render json: {
+            items: hooks.map { |h| { id: h.id, label: h.settings&.dig("label").presence || "Conta #{h.id[0, 8]}" } }
+          }, status: :ok
         end
 
         # GET /reports/helena_wts/ad_context?ad_id=... — nome do anúncio/
