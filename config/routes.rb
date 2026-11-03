@@ -195,6 +195,12 @@ Rails.application.routes.draw do
         get '/orders', to: 'mercado_livre#index'
         post '/orders/sync', to: 'mercado_livre#sync'
         post '/products/:product_id/publish', to: 'mercado_livre#publish_product'
+        get '/products', to: 'mercado_livre#products'
+        get '/questions', to: 'mercado_livre#questions'
+        post '/questions/answer', to: 'mercado_livre#answer_question'
+        get '/reviews', to: 'mercado_livre#reviews'
+        get '/orders/:order_id/messages', to: 'mercado_livre#messages'
+        post '/orders/:order_id/messages', to: 'mercado_livre#send_message'
       end
       scope :shopee, as: :shopee do
         get '/status', to: 'shopee#status'

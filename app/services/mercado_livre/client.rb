@@ -10,6 +10,12 @@
 # continuam SEM teste real (sem pedido/produto publicado ainda pra
 # exercitar); #publish_item principalmente — payload de criação de anúncio
 # tem bastante variação por categoria real do ML.
+#
+# #my_items/#items_details/#questions/#reviews testados contra a API real
+# em 30/10/2026 (mesma conta, 2 anúncios reais publicados — ver
+# comentário de cada método). #answer_question/#messages/#send_message
+# continuam SEM teste real (sem pergunta pendente nem pedido com pack_id
+# ainda pra exercitar).
 class MercadoLivre::Client
   BASE_URL = 'https://api.mercadolibre.com'
   TOKEN_URL = 'https://api.mercadolibre.com/oauth/token'
@@ -109,6 +115,68 @@ class MercadoLivre::Client
 
   def pause_item(ml_item_id)
     update_item(ml_item_id, status: 'paused')
+  end
+
+  # Lista os ANÚNCIOS JÁ PUBLICADOS do vendedor (diferente de #publish_item,
+  # que CRIA um novo) — devolve só os IDs
+  # (https://developers.mercadolivre.com.br/en_us/items-and-searches),
+  # por isso sempre busca os detalhes em seguida via #items_details.
+  def my_items(status: nil, offset: 0, limit: 50)
+    params = { offset: offset, limit: limit }
+    params[:status] = status if status.present?
+    get("/users/#{user_id}/items/search", params: params)
+  end
+
+  # Multiget oficial (`/items?ids=...`) devolve um array de
+  # {code, body} por item, não os itens direto — por isso extrai `body` e
+  # descarta quem veio com erro (anúncio removido/de outro vendedor etc.,
+  # não trava a tela por 1 item problemático). Limite de 20 ids por chamada
+  # documentado pela API — quem chama aqui já faz o chunk.
+  def items_details(ids)
+    return [] if ids.blank?
+
+    results = get('/items', params: { ids: ids.join(',') })
+    Array(results).filter_map { |r| r['body'] if r['code'].to_i == 200 }
+  end
+
+  # --- Perguntas (Q&A nos anúncios) ---
+
+  # status real da pergunta: UNANSWERED | ANSWERED | CLOSED_UNANSWERED |
+  # UNDER_REVIEW | BANNED | DELETED | DISABLED.
+  def questions(status: 'UNANSWERED', offset: 0, limit: 50)
+    params = { seller_id: user_id, offset: offset, limit: limit, api_version: 4 }
+    params[:status] = status if status.present?
+    get('/questions/search', params: params)
+  end
+
+  # Responde pergunta feita num anúncio do vendedor — texto limitado pela
+  # própria API (varia por site, documentado como até 2000 caracteres no
+  # BR); deixa a API recusar se passar do limite em vez de truncar aqui.
+  def answer_question(question_id, text:)
+    post('/answers', { question_id: question_id, text: text })
+  end
+
+  # --- Avaliações ---
+
+  # Só LEITURA — diferente do iFood, a API do ML não expõe endpoint pra
+  # vendedor responder avaliação (confirmado na doc oficial de reviews).
+  def reviews(ml_item_id, offset: 0, limit: 10)
+    get("/reviews/item/#{ml_item_id}", params: { offset: offset, limit: limit })
+  end
+
+  # --- Mensagens pós-venda (chat comprador/vendedor) ---
+
+  # `pack_id` vem do pedido (campo `pack_id` da Orders API; cai pro próprio
+  # `ml_order_id` quando pack_id vier nulo — comportamento documentado pela
+  # API pra pedido fora de um pack).
+  def messages(pack_id)
+    get("/messages/packs/#{pack_id}/sellers/#{user_id}")
+  end
+
+  # Texto limitado a 350 caracteres pela própria API (ISO-8859-1 + alguns
+  # emoticons) — deixa a API recusar em vez de truncar/validar aqui.
+  def send_message(pack_id, text:)
+    post("/messages/packs/#{pack_id}/sellers/#{user_id}", { text: text })
   end
 
   private
