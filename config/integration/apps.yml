@@ -120,11 +120,16 @@ dropbox:
 # Gestor de Posts (Marketing > Painel Tráfego). Exige um app TikTok for
 # Developers próprio (TIKTOK_CLIENT_KEY/TIKTOK_CLIENT_SECRET em
 # GlobalConfig, configurados na própria tela — ver TiktokPage.tsx, mesmo
-# padrão do Developer Token do Google Ads). Publicar de verdade exige a
-# Content Posting API aprovada pela TikTok pro app (pode levar dias/não
-# estar aprovado ainda) — esta integração cobre a CONEXÃO (OAuth +
-# guardar o token); o botão de publicar em Gestor de Posts é construído
-# à parte, depois que a conexão existir.
+# padrão do Developer Token do Google Ads). Esta integração cobre a
+# CONEXÃO (OAuth + guardar o token); o botão de publicar em Gestor de
+# Posts é construído à parte, depois que a conexão existir.
+#
+# ⚠️ Confirmado ao vivo 04/11/2026 (ver Integrations::App#build_tiktok_action):
+# ao contrário de outras integrações OAuth deste arquivo, aqui NENHUMA
+# conexão funciona (nem login básico) antes do app ser APROVADO pela
+# TikTok (App Review) — um app pendente/rejeitado recusa
+# `/v2/auth/authorize` com unauthorized_client pra qualquer escopo. Não
+# é só "publicar que depende de aprovação".
 tiktok:
   id: tiktok
   logo: tiktok.png

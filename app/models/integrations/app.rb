@@ -287,9 +287,18 @@ class Integrations::App
   # outra conexão já existente. `scope` precisa bater com o que está
   # aprovado pro app no painel da TikTok (Login Kit vs. Content Posting
   # API são produtos separados, cada um com seus próprios escopos e
-  # processo de revisão) — `video.publish` só funciona depois da TikTok
-  # aprovar a Content Posting API pro app; até lá, a conexão em si
-  # (user.info.basic) continua funcionando normalmente.
+  # processo de revisão).
+  #
+  # ⚠️ Confirmado ao vivo 04/11/2026: um app PENDENTE/REJEITADO na revisão
+  # da TikTok recusa `/v2/auth/authorize` com `error=unauthorized_client&
+  # error_type=client_key` pra QUALQUER escopo, inclusive só
+  # `user.info.basic` (testado isolado, sem video.publish) — não existe
+  # "conexão básica funciona, só postar que depende de aprovação": o app
+  # inteiro precisa estar aprovado (App Review) antes de QUALQUER login
+  # funcionar em produção. Alternativa pra testar antes da aprovação:
+  # ambiente "Sandbox" da TikTok for Developers (client_key/secret e
+  # redirect_uri PRÓPRIOS, separados dos de produção — não implementado
+  # aqui ainda).
   def build_tiktok_action
     client_key = GlobalConfigService.load('TIKTOK_CLIENT_KEY', nil)
     return nil unless client_key.present?
