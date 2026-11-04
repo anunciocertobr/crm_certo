@@ -16,6 +16,7 @@ module Api
           'google_oauth' => %w[GOOGLE_OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_SECRET GOOGLE_OAUTH_CALLBACK_URL],
           'google_ads' => %w[GOOGLE_ADS_DEVELOPER_TOKEN],
           'dropbox' => %w[DROPBOX_APP_KEY DROPBOX_APP_SECRET],
+          'tiktok' => %w[TIKTOK_CLIENT_KEY TIKTOK_CLIENT_SECRET],
           'marketing_alerts' => %w[
             MARKETING_ALERTS_CHANNELS MARKETING_ALERTS_INBOX_ID
             MARKETING_ALERTS_WHATSAPP_NUMBER MARKETING_ALERTS_EMAIL
