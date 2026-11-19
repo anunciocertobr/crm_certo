@@ -1207,6 +1207,10 @@ Rails.application.routes.draw do
         get 'menu', to: 'menu#show'
         post 'menu/orders', to: 'menu_orders#create'
         get 'menu/orders/:token/status', to: 'menu_orders#status'
+        # Pagamento online do cardápio (Checkout Integrado InfinitePay) —
+        # webhook da InfinitePay e confirmação no retorno do cliente.
+        post 'menu/orders/infinitepay_webhook', to: 'menu_orders#infinitepay_webhook'
+        post 'menu/orders/:token/confirm_payment', to: 'menu_orders#confirm_payment'
         post 'menu/google_login', to: 'menu_google_auth#login'
 
         # Site de imóveis — catálogo de imóveis ativos (item_type "imovel"),

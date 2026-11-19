@@ -135,6 +135,7 @@ module Api
             MENU_COMPANY_NAME MENU_HEADER_COLOR MENU_BACKGROUND_COLOR MENU_FOOTER_COLOR
             MENU_ICON_COLOR MENU_TEXT_COLOR MENU_TITLE_COLOR MENU_COMPANY_NAME_COLOR
             MENU_GTM_ID MENU_WHATSAPP_NUMBER MENU_ORDER_INBOX_ID
+            MENU_CHECKOUT_ENABLED MENU_INFINITEPAY_HANDLE MENU_INFINITEPAY_API_SECRET
           ],
           # Organização > Imobiliária — sem inbox: o contato de cada imóvel é um
           # link wa.me aberto no navegador do visitante, não um pedido roteado
