@@ -39,6 +39,10 @@ class Public::Api::V1::MenuController < PublicController
       company_name_color: GlobalConfigService.load('MENU_COMPANY_NAME_COLOR', nil),
       gtm_id: GlobalConfigService.load('MENU_GTM_ID', nil),
       whatsapp_number: GlobalConfigService.load('MENU_WHATSAPP_NUMBER', nil),
+      # Pagamento online ligado e com o provedor configurado — o cardápio
+      # troca "Enviar Pedido" por "Ir para pagamento".
+      checkout_enabled: DigitalMenu::CheckoutService.enabled?,
+      checkout_provider: DigitalMenu::CheckoutService.provider_client.label,
       google_client_id: GlobalConfigService.load('GOOGLE_OAUTH_CLIENT_ID', nil)
     }
   end
