@@ -1207,9 +1207,10 @@ Rails.application.routes.draw do
         get 'menu', to: 'menu#show'
         post 'menu/orders', to: 'menu_orders#create'
         get 'menu/orders/:token/status', to: 'menu_orders#status'
-        # Pagamento online do cardápio (Checkout Integrado InfinitePay) —
-        # webhook da InfinitePay e confirmação no retorno do cliente.
+        # Pagamento online do cardápio (InfinitePay ou Mercado Pago) —
+        # webhooks dos provedores e confirmação no retorno do cliente.
         post 'menu/orders/infinitepay_webhook', to: 'menu_orders#infinitepay_webhook'
+        post 'menu/orders/mercadopago_webhook', to: 'menu_orders#mercadopago_webhook'
         post 'menu/orders/:token/confirm_payment', to: 'menu_orders#confirm_payment'
         post 'menu/google_login', to: 'menu_google_auth#login'
 

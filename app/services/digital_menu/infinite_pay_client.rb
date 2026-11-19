@@ -16,7 +16,11 @@ class DigitalMenu::InfinitePayClient
   OPEN_TIMEOUT = 5
   READ_TIMEOUT = 15
 
-  class Error < StandardError; end
+  class Error < DigitalMenu::CheckoutProviderError; end
+
+  def self.label
+    'InfinitePay'
+  end
 
   def self.handle
     GlobalConfigService.load('MENU_INFINITEPAY_HANDLE', nil).to_s.strip.delete_prefix('$').presence
@@ -26,14 +30,13 @@ class DigitalMenu::InfinitePayClient
     GlobalConfigService.load('MENU_INFINITEPAY_API_SECRET', nil).to_s.strip.presence
   end
 
-  # Checkout ligado em Organização > Cardápio Digital E com conta configurada.
-  def self.enabled?
-    flag = GlobalConfigService.load('MENU_CHECKOUT_ENABLED', nil)
-    ActiveModel::Type::Boolean.new.cast(flag) == true && (handle.present? || api_key.present?)
+  def self.configured?
+    handle.present? || api_key.present?
   end
 
   # Retorna a URL do checkout. `items` = [{ description:, quantity:, price: (centavos) }]
-  def create_link(order_nsu:, items:, redirect_url:, webhook_url:, customer: nil, address: nil)
+  # `customer` = hash do formulário do cardápio (full_name, phone, email, zip, address...).
+  def create_link(order_nsu:, items:, redirect_url:, webhook_url:, customer: {})
     payload = {
       order_nsu: order_nsu,
       items: items,
@@ -41,7 +44,9 @@ class DigitalMenu::InfinitePayClient
       webhook_url: webhook_url
     }
     payload[:handle] = self.class.handle if self.class.handle.present?
-    payload[:customer] = customer if customer.present?
+    buyer = build_customer(customer)
+    payload[:customer] = buyer if buyer.present?
+    address = build_address(customer)
     payload[:address] = address if address.present?
     # `options` exige API Key. Link de uso único e com validade, pra não ficar
     # um link eterno aceitando pagamentos de um pedido antigo.
@@ -75,6 +80,32 @@ class DigitalMenu::InfinitePayClient
   end
 
   private
+
+  def build_customer(customer)
+    customer = customer.to_h.symbolize_keys
+    phone = customer[:phone].to_s.gsub(/\D/, '')
+    phone = "55#{phone}" if phone.present? && !phone.start_with?('55')
+    {
+      name: customer[:full_name].presence,
+      email: customer[:email].presence,
+      phone_number: phone.present? ? "+#{phone}" : nil
+    }.compact.presence
+  end
+
+  def build_address(customer)
+    customer = customer.to_h.symbolize_keys
+    cep = customer[:zip].to_s.gsub(/\D/, '')
+    return nil if cep.length != 8 || customer[:address].blank?
+
+    {
+      cep: cep,
+      street: customer[:address],
+      number: customer[:number].presence,
+      neighborhood: customer[:neighborhood].presence,
+      city: customer[:city].presence,
+      state: customer[:state].presence
+    }.compact
+  end
 
   def post(path, payload)
     uri = URI("#{BASE_URL}#{path}")

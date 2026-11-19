@@ -10,11 +10,19 @@
 class DigitalMenu::OrderNotificationService
   Result = Struct.new(:success, :error, keyword_init: true)
 
-  CAPTURE_METHOD_LABELS = { 'pix' => 'Pix', 'credit_card' => 'Cartão de crédito' }.freeze
+  CAPTURE_METHOD_LABELS = {
+    'pix' => 'Pix',
+    'credit_card' => 'Cartão de crédito',
+    'debit_card' => 'Cartão de débito',
+    'prepaid_card' => 'Cartão pré-pago',
+    'account_money' => 'Saldo Mercado Pago',
+    'ticket' => 'Boleto',
+    'bank_transfer' => 'Transferência'
+  }.freeze
 
-  # payment: preenchido só em pedido pago online (checkout InfinitePay) —
-  # { capture_method:, installments:, amount_cents:, paid_amount_cents:,
-  #   transaction_nsu:, receipt_url: }
+  # payment: preenchido só em pedido pago online (checkout InfinitePay ou
+  # Mercado Pago) — { provider:, capture_method:, installments:,
+  # amount_cents:, paid_amount_cents:, transaction_nsu:, receipt_url: }
   def initialize(customer:, items:, payment_method:, notes:, payment: nil)
     @customer = customer.to_h.symbolize_keys
     @items = items.map { |i| i.to_h.symbolize_keys }
@@ -109,7 +117,7 @@ class DigitalMenu::OrderNotificationService
     method = CAPTURE_METHOD_LABELS.fetch(@payment[:capture_method].to_s, @payment[:capture_method].presence || 'online')
     installments = @payment[:installments].to_i
     method += " em #{installments}x" if installments > 1
-    lines = ["*Pagamento:* PAGO via InfinitePay — #{method}"]
+    lines = ["*Pagamento:* PAGO via #{@payment[:provider].presence || 'checkout online'} — #{method}"]
     lines << "*Valor pago:* #{format_currency(@payment[:paid_amount_cents].to_i / 100.0)}" if @payment[:paid_amount_cents].present?
     lines << "*Transação:* #{@payment[:transaction_nsu]}" if @payment[:transaction_nsu].present?
     lines << "*Comprovante:* #{@payment[:receipt_url]}" if @payment[:receipt_url].present?
