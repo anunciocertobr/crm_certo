@@ -50,13 +50,17 @@
 #     01/07, 01/08, 01/09). Sem essa flag em 1, nenhuma emissão real vai
 #     funcionar nessa cidade, não importa o quão correta a DPS esteja.
 #
-# IMPORTANTE: só tem o método `emitir_homologacao`, de propósito — força
-# tpAmb=2 (Homologação) e aponta pro host de produção restrita, nunca pro
-# de produção real. NÃO está plugado em FiscalEstablishment#provider_client
-# (nenhuma nota real passa por aqui ainda) até: 1) confirmar
-# `aderenteEmissorNacional: 1` pro município do estabelecimento, 2)
-# validar o cTribNac certo, 3) completar um teste de emissão de ponta a
-# ponta em homologação, e 4) o usuário autorizar ligar pra valer.
+# Uso: EmissorNacional::ProviderClient (provider_key 'emissor_nacional')
+# chama este client com o tpAmb do estabelecimento (1 produção, 2
+# homologação). `emitir_homologacao` continua existindo pra testes isolados.
+#
+# Atualização 24/11/2026: DPS conferida contra os XSDs oficiais (produção
+# v1.01 de 09/02/2026 e produção restrita de 20/10/2026) e o Anexo I —
+# cTribNac pela lista nacional, regras do Simples (pTotTribSN em vez de
+# indTotTrib, regApTribSN) e IBSCBS opcional. Em homologação passa no
+# schema e para em E0039 (Guarulhos não parametrizado pros emissores
+# públicos nacionais nesse ambiente); produção só é ligada trocando o
+# provider_key do estabelecimento, com autorização do usuário.
 module EmissorNacional
   class Client
     class Error < StandardError; end
@@ -64,6 +68,9 @@ module EmissorNacional
     Result = Struct.new(:success, :data, :error, :raw_response, keyword_init: true)
 
     HOMOLOGACAO_BASE = 'https://sefin.producaorestrita.nfse.gov.br/SefinNacional'.freeze
+    PRODUCAO_BASE = 'https://sefin.nfse.gov.br/SefinNacional'.freeze
+    # tpAmb do leiaute: 1 = produção, 2 = homologação (produção restrita).
+    BASES = { '1' => PRODUCAO_BASE, '2' => HOMOLOGACAO_BASE }.freeze
     # ADN (sistema de parametrização, separado do Sefin Nacional acima) —
     # único jeito encontrado de checar se um município "ligou" o lado dele
     # do convênio (ver comentário no topo do arquivo).
@@ -115,6 +122,61 @@ module EmissorNacional
     # oficial (DPS_v1.01.xsd) antes de qualquer chamada ao Sefin.
     def dps_xml_homologacao(invoice)
       sign(build_dps_xml(invoice, ambiente: '2'))
+    end
+
+    # ---------------------------------------------------- API (por ambiente)
+    # tp_amb: '1' produção (sefin.nfse.gov.br) ou '2' homologação. Quem
+    # decide é EmissorNacional::ProviderClient, a partir de
+    # FiscalEstablishment#ambiente.
+
+    # Assina e envia a DPS. Devolve [dps_xml_assinada, Result].
+    def emitir_dps(invoice, tp_amb:)
+      dps_xml = sign(build_dps_xml(invoice, ambiente: tp_amb))
+      body = { dpsXmlGZipB64: gzip_base64(dps_xml) }.to_json
+      [dps_xml, parse_response(post('/nfse', body, tp_amb: tp_amb))]
+    end
+
+    # Id da DPS (mesmo usado no atributo Id do infDPS) — serve pra consultar
+    # se a NFS-e foi gerada quando a resposta da emissão se perdeu.
+    def dps_id_for(invoice)
+      dps_id(invoice.serie_rps, invoice.numero_rps)
+    end
+
+    # GET /dps/{id} -> chave de acesso (200) ou nil (404 = não gerada).
+    def chave_por_dps(dps_id, tp_amb:)
+      response = get("/dps/#{dps_id}", tp_amb: tp_amb)
+      return nil if response.code.to_i == 404
+      raise Error, "Consulta da DPS falhou (HTTP #{response.code}): #{response.body.to_s[0, 300]}" unless response.code.to_i == 200
+
+      JSON.parse(response.body)['chaveAcesso'].presence
+    end
+
+    # GET /nfse/{chave} -> XML da NFS-e.
+    def consultar_nfse(chave, tp_amb:)
+      response = get("/nfse/#{chave}", tp_amb: tp_amb)
+      raise Error, "Consulta da NFS-e falhou (HTTP #{response.code}): #{response.body.to_s[0, 300]}" unless response.code.to_i == 200
+
+      gunzip_base64(JSON.parse(response.body)['nfseXmlGZipB64'])
+    end
+
+    # Evento 101101 (cancelamento). codigo: 1 erro na emissão, 2 serviço não
+    # prestado, 9 outros (TSCodJustCanc). motivo: 15-255 caracteres.
+    def cancelar_nfse(chave, tp_amb:, codigo: '9', motivo: 'Cancelamento solicitado pelo prestador')
+      xml = sign_element(build_cancelamento_xml(chave, tp_amb: tp_amb, codigo: codigo, motivo: motivo), 'infPedReg')
+      body = { pedidoRegistroEventoXmlGZipB64: gzip_base64(xml) }.to_json
+      response = post("/nfse/#{chave}/eventos", body, tp_amb: tp_amb)
+      parsed = begin
+        JSON.parse(response.body)
+      rescue JSON::ParserError
+        {}
+      end
+      if response.code.to_i == 201
+        Result.new(success: true, data: parsed.merge('eventoXml' => gunzip_base64(parsed['eventoXmlGZipB64'].to_s)),
+                   raw_response: response.body)
+      else
+        Result.new(success: false, error: parsed['erros'] || parsed['erro'] || response.body.to_s[0, 500],
+                   raw_response: response.body)
+      end
     end
 
     # Código de Tributação Nacional (6 dígitos) — Anexo B da documentação
@@ -378,9 +440,15 @@ module EmissorNacional
     # SHA256). Algoritmo não confirmado contra doc oficial — ver comentário
     # no topo do arquivo.
     def sign(xml_string)
+      sign_element(xml_string, 'infDPS')
+    end
+
+    # Mesma assinatura pra qualquer documento do leiaute: referencia o Id do
+    # elemento `element_name` (infDPS na DPS, infPedReg no pedido de evento).
+    def sign_element(xml_string, element_name)
       doc = Nokogiri::XML(xml_string)
       signature = doc.at_xpath("//*[local-name()='Signature']")
-      inf_dps = doc.at_xpath("//*[local-name()='infDPS']")
+      inf_dps = doc.at_xpath("//*[local-name()='#{element_name}']")
       id = inf_dps['Id']
 
       digest = OpenSSL::Digest::SHA256.digest(inf_dps.canonicalize)
@@ -426,8 +494,9 @@ module EmissorNacional
       Zlib::GzipReader.new(StringIO.new(Base64.decode64(b64))).read
     end
 
-    def post(path, body)
-      uri = URI("#{HOMOLOGACAO_BASE}#{path}")
+    def http_for(path, tp_amb)
+      base = BASES.fetch(tp_amb.to_s) { raise Error, "tpAmb inválido: #{tp_amb.inspect}" }
+      uri = URI("#{base}#{path}")
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
       http.cert = pkcs12.certificate
@@ -435,10 +504,45 @@ module EmissorNacional
       http.verify_mode = OpenSSL::SSL::VERIFY_PEER
       http.open_timeout = 20
       http.read_timeout = 30
+      [http, uri]
+    end
 
+    def post(path, body, tp_amb: '2')
+      http, uri = http_for(path, tp_amb)
       request = Net::HTTP::Post.new(uri.request_uri)
       request['Content-Type'] = 'application/json'
       http.request(request, body)
+    end
+
+    def get(path, tp_amb:)
+      http, uri = http_for(path, tp_amb)
+      request = Net::HTTP::Get.new(uri.request_uri)
+      request['Accept'] = 'application/json'
+      http.request(request)
+    end
+
+    # Pedido de registro do evento 101101 (cancelamento) —
+    # tiposEventos_v1.01.xsd: pedRegEvento > infPedReg(Id) > tpAmb, verAplic,
+    # dhEvento, CNPJAutor, chNFSe, e101101{xDesc, cMotivo, xMotivo}.
+    # Id = "PRE" + chave(50) + tipo do evento(6).
+    def build_cancelamento_xml(chave, tp_amb:, codigo:, motivo:)
+      inf = tag('infPedReg',
+                el('tpAmb', tp_amb) +
+                el('verAplic', 'AnuncioCertoCRM1.0') +
+                el('dhEvento', Time.now.in_time_zone('America/Sao_Paulo').strftime('%Y-%m-%dT%H:%M:%S%:z')) +
+                el('CNPJAutor', prestador_cnpj) +
+                el('chNFSe', chave) +
+                grp('e101101',
+                    el('xDesc', 'Cancelamento de NFS-e') +
+                    el('cMotivo', codigo) +
+                    el('xMotivo', motivo.to_s.strip.ljust(15, '.')[0, 255])),
+                'Id' => "PRE#{chave}101101")
+
+      '<?xml version="1.0" encoding="UTF-8"?>' \
+      '<pedRegEvento xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01">' \
+      "#{inf}" \
+      "<Signature xmlns=\"#{DSIG_NS}\"></Signature>" \
+      '</pedRegEvento>'
     end
 
     def parse_response(response)
