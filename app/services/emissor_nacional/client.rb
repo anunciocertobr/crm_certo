@@ -104,14 +104,88 @@ module EmissorNacional
 
     # Só homologação, de propósito — ver comentário no topo do arquivo.
     def emitir_homologacao(invoice)
-      dps_xml = sign(build_dps_xml(invoice, ambiente: '2'))
+      dps_xml = dps_xml_homologacao(invoice)
       body = { dpsXmlGZipB64: gzip_base64(dps_xml) }.to_json
 
       response = post('/nfse', body)
       parse_response(response)
     end
 
+    # DPS assinada (tpAmb=2), sem enviar — usada pra validar contra o XSD
+    # oficial (DPS_v1.01.xsd) antes de qualquer chamada ao Sefin.
+    def dps_xml_homologacao(invoice)
+      sign(build_dps_xml(invoice, ambiente: '2'))
+    end
+
+    # Código de Tributação Nacional (6 dígitos) — Anexo B da documentação
+    # oficial (anexo_b-nbs2-lista_servico_nacional-snnfse-v1-01-20260122):
+    # item(2) + subitem(2) + desdobro nacional(2). O desdobro NÃO é "00":
+    # a lista nacional começa em "01" (ex.: 17.06 -> 170601, "Propaganda e
+    # publicidade..."). Itens com mais de um desdobro precisam ser
+    # escolhidos explicitamente; os usados pela empresa ficam aqui.
+    # 17.02 fica de fora de propósito: tem 5 desdobros (170201 datilografia,
+    # 170202 expediente/secretaria, ...), não dá pra escolher sem saber o
+    # serviço — mapear quando a empresa usar.
+    CODIGOS_TRIBUTACAO_NACIONAL = {
+      '1701' => '170101',
+      '1706' => '170601',
+      '1008' => '100801',
+      '1009' => '100901'
+    }.freeze
+
+    # NBS padrão por item (Anexo B / tabela de correlação item x NBS x
+    # cIndOp x cClassTrib). 17.06 -> 1.1406.11.00 "Serviços de campanhas
+    # publicitárias", que é o que a empresa presta (tráfego pago).
+    CODIGOS_NBS_PADRAO = {
+      '1706' => '114061100'
+    }.freeze
+
+    # Reforma Tributária (LC 214/2025) — valores da tabela oficial de
+    # correlação (Anexo C / tabela da prefeitura) para prestação onerosa
+    # nacional: cIndOp 100301 (local de incidência = domicílio do
+    # adquirente), CST 000 / cClassTrib 000001 (tributação integral).
+    # Para optante do Simples Nacional o grupo IBSCBS é OPCIONAL até 2027
+    # (Anexo I, leiaute DPS, nota do campo IBSCBS) — por isso só vai na DPS
+    # com NFSE_NACIONAL_IBSCBS_ENABLED ligado.
+    IBSCBS_IND_OP_PADRAO = '100301'
+    IBSCBS_CST_PADRAO = '000'
+    IBSCBS_CLASS_TRIB_PADRAO = '000001'
+
     private
+
+    # Situação perante o Simples Nacional (leiaute DPS, prest/regTrib/opSimpNac):
+    # 1 = não optante, 2 = MEI, 3 = ME/EPP. Tem que bater com o cadastro do
+    # Simples na competência, senão a DPS é rejeitada (E0160).
+    def op_simp_nac
+      case GlobalConfigService.load('ORG_REGIME_TRIBUTARIO', '').to_s
+      when 'simples_nacional' then '3'
+      when 'mei' then '2'
+      else '1'
+      end
+    end
+
+    def simples_me_epp?
+      op_simp_nac == '3'
+    end
+
+    # Percentual aproximado de tributos do Simples Nacional (Lei
+    # 12.741/2012). Para ME/EPP o leiaute PROÍBE indTotTrib (regra E0712) —
+    # só aceita pTotTribSN (ou os percentuais detalhados). Valor vem do
+    # contador: NFSE_PTOTTRIBSN, ex. "6.00".
+    def p_tot_trib_sn
+      value = GlobalConfigService.load('NFSE_PTOTTRIBSN', nil).to_s.tr(',', '.').strip
+      raise Error, 'Configure NFSE_PTOTTRIBSN (percentual aproximado de tributos do Simples Nacional)' if value.blank?
+
+      format('%.2f', value.to_f)
+    end
+
+    def ibscbs_enabled?
+      ActiveModel::Type::Boolean.new.cast(GlobalConfigService.load('NFSE_NACIONAL_IBSCBS_ENABLED', false)) == true
+    end
+
+    def item_subitem(invoice)
+      invoice.codigo_servico_municipal.to_s.gsub(/\D/, '')[0, 4]
+    end
 
     def pkcs12
       @pkcs12 ||= @establishment.certificate_pkcs12
@@ -131,26 +205,54 @@ module EmissorNacional
       "DPS#{cod_mun}2#{prestador_cnpj}#{serie.to_s.rjust(5, '0')}#{numero.to_s.rjust(15, '0')}"
     end
 
+    # Leiautes da DPS em uso (os dois são "versao=1.01" no XML, mas os XSDs
+    # publicados divergem):
+    #   - 'v1_01'        -> produção: nfse-esquemas_xsd-v1-01-20260209.zip
+    #   - 'rtc_20261020' -> produção restrita (homologação):
+    #                       esquemas_prod_restrita_20261020.zip
+    # Diferenças que afetam esta DPS: finNFSe (infDPS no rtc, dentro de
+    # IBSCBS no v1_01), ordem de xDescServ/cNBS em cServ, e o miolo de
+    # IBSCBS/valores/trib. NFSE_NACIONAL_LAYOUT força um deles — virar pra
+    # 'rtc_20261020' quando a produção adotar o leiaute novo.
+    LAYOUTS = %w[v1_01 rtc_20261020].freeze
+
+    def layout_for(ambiente)
+      forced = GlobalConfigService.load('NFSE_NACIONAL_LAYOUT', nil).to_s
+      return forced if LAYOUTS.include?(forced)
+
+      ambiente.to_s == '2' ? 'rtc_20261020' : 'v1_01'
+    end
+
+    def rtc?
+      @layout == 'rtc_20261020'
+    end
+
     def build_dps_xml(invoice, ambiente:)
+      @layout = layout_for(ambiente)
       serie = invoice.serie_rps
       numero = invoice.numero_rps
       id = dps_id(serie, numero)
 
-      inf_dps = tag('infDPS', {
+      cabecalho = {
         'tpAmb' => ambiente,
         'dhEmi' => Time.now.in_time_zone('America/Sao_Paulo').strftime('%Y-%m-%dT%H:%M:%S%:z'),
         'verAplic' => 'AnuncioCertoCRM1.0',
         'serie' => serie.to_s,
         'nDPS' => numero.to_s,
         'dCompet' => Date.current.strftime('%Y-%m-%d'),
-        'tpEmit' => '1',
-        'finNFSe' => '0',
-        'cLocEmi' => @establishment.municipio_ibge_code
-      }.map { |k, v| el(k, v) }.join +
+        'tpEmit' => '1'
+      }
+      # finNFSe (0 = regular): obrigatório no infDPS do leiaute rtc; no v1_01
+      # ele só existe dentro de IBSCBS.
+      cabecalho['finNFSe'] = '0' if rtc?
+      cabecalho['cLocEmi'] = @establishment.municipio_ibge_code
+
+      inf_dps = tag('infDPS', cabecalho.map { |k, v| el(k, v) }.join +
         grp('prest', prestador_xml) +
         grp('toma', tomador_xml(invoice)) +
         grp('serv', servico_xml(invoice)) +
-        grp('valores', valores_xml(invoice)),
+        grp('valores', valores_xml(invoice)) +
+        (ibscbs_enabled? ? grp('IBSCBS', ibscbs_xml) : ''),
         'Id' => id)
 
       '<?xml version="1.0" encoding="UTF-8"?>' \
@@ -163,7 +265,26 @@ module EmissorNacional
     def prestador_xml
       cnpj_cpf_xml(prestador_cnpj) +
         el('IM', @establishment.inscricao_municipal) +
-        grp('regTrib', el('opSimpNac', '3') + el('regEspTrib', '0'))
+        grp('regTrib',
+            el('opSimpNac', op_simp_nac) +
+            # 1 = tributos federais e municipal apurados pelo Simples (caso
+            # normal, sem sublimite estourado). Proibido pra não optante/MEI (E0162).
+            (simples_me_epp? ? el('regApTribSN', '1') : '') +
+            el('regEspTrib', '0'))
+    end
+
+    # Grupo IBSCBS (TCRTCInfoIBSCBS). Diferente do leiaute GISS/ABRASF, aqui
+    # NÃO vão cLocalidadeIncid/pRedutor/vBC — o Sefin calcula e devolve na
+    # NFS-e. Miolo por leiaute:
+    #   v1_01: finNFSe, indFinal?, cIndOp, indDest, valores>trib>gIBSCBS>{CST,cClassTrib}
+    #   rtc:   indFinal?, cIndOp?, indDest, valores>trib>{CST,cClassTrib}
+    def ibscbs_xml
+      classificacao = el('CST', IBSCBS_CST_PADRAO) + el('cClassTrib', IBSCBS_CLASS_TRIB_PADRAO)
+      (rtc? ? '' : el('finNFSe', '0')) +
+        el('indFinal', '0') +
+        el('cIndOp', IBSCBS_IND_OP_PADRAO) +
+        el('indDest', '0') +
+        grp('valores', grp('trib', rtc? ? classificacao : grp('gIBSCBS', classificacao)))
     end
 
     def tomador_xml(invoice)
@@ -187,15 +308,23 @@ module EmissorNacional
       grp('locPrest', el('cLocPrestacao', @establishment.municipio_ibge_code)) +
         grp('cServ',
             el('cTribNac', codigo_tributacao_nacional(invoice)) +
-            el('xDescServ', invoice.discriminacao) +
-            el('cNBS', invoice.codigo_nbs.presence))
+            # Ordem muda entre leiautes: v1_01 = xDescServ, cNBS; rtc = cNBS, xDescServ.
+            (rtc? ? el('cNBS', codigo_nbs(invoice)) + el('xDescServ', invoice.discriminacao)
+                  : el('xDescServ', invoice.discriminacao) + el('cNBS', codigo_nbs(invoice))))
     end
 
-    # cTribNac: 6 dígitos (2 item + 2 subitem LC116 + 2 desdobro nacional,
-    # default "00" quando o município não tem desdobro próprio) — invoice
-    # guarda só "17.06" (item.subitem); monta os 6 dígitos com desdobro 00.
+    # Ver CODIGOS_TRIBUTACAO_NACIONAL. Item sem mapeamento é recusado em vez
+    # de chutar o desdobro — um cTribNac errado emite nota com o serviço
+    # errado, não dá erro.
     def codigo_tributacao_nacional(invoice)
-      "#{invoice.codigo_servico_municipal.to_s.gsub(/\D/, '').ljust(4, '0')}00"
+      item = item_subitem(invoice)
+      CODIGOS_TRIBUTACAO_NACIONAL[item] ||
+        raise(Error, "Código de tributação nacional não mapeado para o item #{invoice.codigo_servico_municipal} " \
+                     '(ver CODIGOS_TRIBUTACAO_NACIONAL / Anexo B)')
+    end
+
+    def codigo_nbs(invoice)
+      (invoice.codigo_nbs.presence || CODIGOS_NBS_PADRAO[item_subitem(invoice)]).to_s.gsub(/\D/, '').presence
     end
 
     def valores_xml(invoice)
@@ -205,7 +334,8 @@ module EmissorNacional
                 el('tribISSQN', '1') +
                 el('tpRetISSQN', '1') +
                 el('pAliq', format('%.2f', invoice.aliquota_iss_pct.to_f))) +
-            grp('totTrib', el('indTotTrib', '0')))
+            # ME/EPP: indTotTrib é proibido (E0712) — informa pTotTribSN.
+            grp('totTrib', simples_me_epp? ? el('pTotTribSN', p_tot_trib_sn) : el('indTotTrib', '0')))
     end
 
     def cnpj_cpf_xml(digits)
