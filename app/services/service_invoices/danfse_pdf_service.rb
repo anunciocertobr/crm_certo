@@ -67,14 +67,33 @@ module ServiceInvoices
       pdf.move_down 10
     end
 
+    # NFS-e do Emissor Nacional (Sefin): XML com NFSe/infNFSe/{nNFSe, dhProc,
+    # emit{CNPJ, IM, xNome, xFant, enderNac{xLgr, nro, xBairro, UF, CEP}}}.
+    # Nesse caso codigo_verificacao guarda a chave de acesso (50 dígitos).
+    def nacional?
+      @nacional = doc.at_xpath("//*[local-name()='infNFSe']").present? if @nacional.nil?
+      @nacional
+    end
+
+    def emit_node
+      @emit_node ||= doc.at_xpath("//*[local-name()='infNFSe']/*[local-name()='emit']")
+    end
+
     def render_identificacao(pdf)
-      numero = find_text("//*[local-name()='Nfse']/*[local-name()='InfNfse']/*[local-name()='Numero']") || invoice.numero_nfse
-      data_emissao = find_text("//*[local-name()='InfNfse']/*[local-name()='DataEmissao']")
+      if nacional?
+        numero = find_text("//*[local-name()='infNFSe']/*[local-name()='nNFSe']") || invoice.numero_nfse
+        data_emissao = find_text("//*[local-name()='infNFSe']/*[local-name()='dhProc']")
+        rotulo_codigo = 'Chave de acesso'
+      else
+        numero = find_text("//*[local-name()='Nfse']/*[local-name()='InfNfse']/*[local-name()='Numero']") || invoice.numero_nfse
+        data_emissao = find_text("//*[local-name()='InfNfse']/*[local-name()='DataEmissao']")
+        rotulo_codigo = 'Código de verificação'
+      end
 
       pdf.table(
         [
-          ['NFS-e nº', numero.to_s, 'RPS', "#{invoice.serie_rps}/#{invoice.numero_rps}"],
-          ['Data de emissão', format_datetime(data_emissao), 'Código de verificação', invoice.codigo_verificacao.to_s],
+          ['NFS-e nº', numero.to_s, nacional? ? 'DPS' : 'RPS', "#{invoice.serie_rps}/#{invoice.numero_rps}"],
+          ['Data de emissão', format_datetime(data_emissao), rotulo_codigo, invoice.codigo_verificacao.to_s],
         ],
         width: pdf.bounds.width,
         cell_style: { size: 8, padding: 4 },
@@ -86,6 +105,8 @@ module ServiceInvoices
     end
 
     def render_prestador(pdf)
+      return render_prestador_nacional(pdf) if nacional?
+
       razao_social = prestador_servico_node&.at_xpath(".//*[local-name()='RazaoSocial']")&.text
       nome_fantasia = prestador_servico_node&.at_xpath(".//*[local-name()='NomeFantasia']")&.text
       cnpj = prestador_identificacao_node&.at_xpath(".//*[local-name()='Cnpj']")&.text
@@ -96,6 +117,25 @@ module ServiceInvoices
       pdf.text "#{razao_social}#{" (#{nome_fantasia})" if nome_fantasia.present? && nome_fantasia != razao_social}", size: 9, style: :bold
       pdf.text "CNPJ: #{format_cnpj(cnpj)}  ·  Inscrição Municipal: #{inscricao}", size: 8
       pdf.text format_endereco_node(endereco_node), size: 8 if endereco_node
+      pdf.move_down 8
+    end
+
+    def render_prestador_nacional(pdf)
+      campo = ->(nome) { emit_node&.at_xpath("./*[local-name()='#{nome}']")&.text }
+      razao_social = campo.call('xNome')
+      nome_fantasia = campo.call('xFant')
+      ender = emit_node&.at_xpath("./*[local-name()='enderNac']")
+      ender_campo = ->(nome) { ender&.at_xpath("./*[local-name()='#{nome}']")&.text }
+      endereco = [
+        [ender_campo.call('xLgr'), ender_campo.call('nro')].compact.join(', '),
+        ender_campo.call('xBairro'),
+        [format_cep(ender_campo.call('CEP')), ender_campo.call('UF')].compact.join(' - ')
+      ].reject(&:blank?).join(' · ')
+
+      section_title(pdf, 'Prestador do Serviço')
+      pdf.text "#{razao_social}#{" (#{nome_fantasia})" if nome_fantasia.present? && nome_fantasia != razao_social}", size: 9, style: :bold
+      pdf.text "CNPJ: #{format_cnpj(campo.call('CNPJ'))}  ·  Inscrição Municipal: #{campo.call('IM')}", size: 8
+      pdf.text endereco, size: 8 if endereco.present?
       pdf.move_down 8
     end
 
@@ -142,6 +182,17 @@ module ServiceInvoices
     def render_rodape(pdf)
       pdf.stroke_horizontal_rule
       pdf.move_down 6
+      if nacional?
+        pdf.text "Chave de acesso: #{invoice.codigo_verificacao}", size: 7.5, color: '555555'
+        pdf.text(
+          'Este é um documento auxiliar gerado a partir da NFS-e autorizada pelo Sistema Nacional NFS-e — ' \
+          'não substitui a NFS-e eletrônica. A autenticidade pode ser conferida na consulta pública do ' \
+          'portal nacional (www.nfse.gov.br) usando a chave de acesso acima.',
+          size: 7, color: '777777',
+        )
+        return
+      end
+
       pdf.text "Protocolo: #{invoice.protocolo}  ·  Código de verificação: #{invoice.codigo_verificacao}", size: 7.5, color: '555555'
       pdf.text(
         'Este é um documento auxiliar gerado a partir dos dados autorizados pela prefeitura — ' \

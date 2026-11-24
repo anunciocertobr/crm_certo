@@ -11,7 +11,9 @@ class FiscalEstablishment < ApplicationRecord
   # numa string vinda do banco (evita instanciar classe arbitrária a partir
   # de dado persistido).
   PROVIDER_CLIENTS = {
-    'guarulhos_gissonline' => 'Guarulhos::Client'
+    'guarulhos_gissonline' => 'Guarulhos::Client',
+    # Sefin Nacional — obrigatório pro Simples Nacional desde 01/11/2026.
+    'emissor_nacional' => 'EmissorNacional::ProviderClient'
   }.freeze
 
   encrypts :certificate_content_encrypted, :certificate_password_encrypted
